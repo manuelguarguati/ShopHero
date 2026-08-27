@@ -14,11 +14,15 @@ agrodata/
 │   ├── context.dsl                       # Diagrama de Contexto del Sistema
 │   └── containers.dsl                    # Diagrama de Contenedores de la Plataforma
 ├── adr/                                  # Architectural Decision Records (ADRs)
+│   ├── ADRs.docx                         # Documento de ADRs (Formato Word)
 │   ├── 0001-record-architecture-decisions.md
-│   ├── 0002-relational-geospatial-and-timeseries-database.md
-│   └── 0003-event-driven-architecture-for-iot-telemetry.md
+│   ├── 0002-uso-de-una-arquitectura-modular.md
+│   ├── 0003-uso-de-una-solucion-de-comunicacion-en-tiempo-real.md
+│   ├── 0004-relational-geospatial-and-timeseries-database.md
+│   └── 0005-event-driven-architecture-for-iot-telemetry.md
 ├── docs/                                 # Documentación del Sistema
-│   └── nfr.md                            # Requerimientos No Funcionales (NFRs)
+│   ├── NFRs.docx                         # Documento de Requerimientos No Funcionales (Formato Word)
+│   └── nfr.md                            # Especificación de NFRs (Formato Markdown)
 └── README.md                             # Documento Principal
 ```
 
@@ -33,12 +37,18 @@ agrodata/
 
 ## 📜 Registros de Decisiones de Arquitectura (`adr/`)
 
+* **Documento Word Original**: [`adr/ADRs.docx`](adr/ADRs.docx)
+
+### Índice de ADRs en Markdown:
 1. **[ADR 0001: Adopción de Registros de Decisiones de Arquitectura (ADR)](adr/0001-record-architecture-decisions.md)**
-2. **[ADR 0002: Selección de Base de Datos Relacional, Geoespacial y de Series Temporales](adr/0002-relational-geospatial-and-timeseries-database.md)**
-3. **[ADR 0003: Arquitectura Basada en Eventos para Ingesta de Telemetría IoT](adr/0003-event-driven-architecture-for-iot-telemetry.md)**
+2. **[ADR 0002: Uso de una Arquitectura Modular para los Servicios Principales](adr/0002-uso-de-una-arquitectura-modular.md)**
+3. **[ADR 0003: Uso de una Solución de Comunicación en Tiempo Real](adr/0003-uso-de-una-solucion-de-comunicacion-en-tiempo-real.md)**
+4. **[ADR 0004: Selección de Base de Datos Relacional, Geoespacial y de Series Temporales](adr/0004-relational-geospatial-and-timeseries-database.md)**
+5. **[ADR 0005: Arquitectura Basada en Eventos para Ingesta de Telemetría IoT](adr/0005-event-driven-architecture-for-iot-telemetry.md)**
 
 ---
 
 ## 📐 Requerimientos No Funcionales (`docs/`)
 
-- **[NFRs (docs/nfr.md)](docs/nfr.md)**: Especificaciones detalladas de Rendimiento (latencias <200ms API, ingesta 5,000 req/sec IoT), Disponibilidad (SLA 99.9%, modo offline móvil), Escalabilidad, Cifrado (TLS 1.3 / AES-256), Seguridad (OAuth2/RBAC) e Interoperabilidad (GeoJSON, OGC WMS/WFS, OpenAPI v3.0).
+* **Documento Word Original**: [`docs/NFRs.docx`](docs/NFRs.docx)
+* **Especificación Markdown**: **[NFRs (docs/nfr.md)](docs/nfr.md)** (Especificaciones de Rendimiento, SLA 99.9%, modo offline móvil, escalabilidad, cifrado TLS 1.3 / AES-256, OAuth2/RBAC e interoperabilidad).

@@ -1,4 +1,4 @@
-# 3. Arquitectura Basada en Eventos para Ingesta de Telemetría IoT
+# 5. Arquitectura Basada en Eventos para Ingesta de Telemetría IoT
 
 * **Estado**: Aceptado
 * **Fecha**: 2026-08-27

@@ -1,4 +1,4 @@
-# 2. Selección de Base de Datos Relacional, Geoespacial y de Series Temporales
+# 4. Selección de Base de Datos Relacional, Geoespacial y de Series Temporales
 
 * **Estado**: Aceptado
 * **Fecha**: 2026-08-27
