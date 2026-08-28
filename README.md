@@ -12,6 +12,9 @@ agrodata/
 │   ├── context.dsl                       # Nivel 1: Diagrama de Contexto de ShopHero
 │   ├── containers.dsl                    # Nivel 2: Diagrama de Contenedores de ShopHero
 │   └── components.dsl                    # Nivel 3: Diagrama de Componentes (Checkout & Reservas)
+├── nfr/                                  # Requerimientos No Funcionales (NFRs)
+│   ├── punto 1 NFRs.docx                 # Documento Word de NFRs (Punto 1)
+│   └── nfr.md                            # 5 Requerimientos No Funcionales (Markdown)
 ├── adr/                                  # Architectural Decision Records (5 ADRs)
 │   ├── punto 3 ADRs.docx                 # Documento Word de ADRs (Punto 3)
 │   ├── 0001-separar-navegacion-y-busqueda-del-checkout-e-inventario.md
@@ -19,10 +22,8 @@ agrodata/
 │   ├── 0003-utilizar-kafka-y-consistencia-eventual-entre-los-servicios.md
 │   ├── 0004-utilizar-redis-cluster-para-carritos-persistentes.md
 │   └── 0005-utilizar-postgresql-y-patron-transactional-outbox-para-confirmar-pedidos.md
-├── docs/                                 # Documentación del Proyecto
-│   ├── punto 1 NFRs.docx                 # Documento Word de NFRs (Punto 1)
+├── docs/                                 # Documentación de Trade-Offs del Proyecto
 │   ├── punto 4 Trade-off.docx            # Documento Word de Trade-offs (Punto 4)
-│   ├── nfr.md                            # 5 Requerimientos No Funcionales (NFRs en Markdown)
 │   └── trade-offs.md                     # Análisis de Trade-Offs (Markdown)
 └── README.md                             # Documento Principal
 ```
@@ -34,6 +35,12 @@ agrodata/
 - **Contexto ([c4/context.dsl](c4/context.dsl))**: Mapea a los actores (*Cliente*, *Administrador*), el sistema principal (*ShopHero*) y el sistema externo (*Pasarela de Pago*).
 - **Contenedores ([c4/containers.dsl](c4/containers.dsl))**: Modela los contenedores (*Aplicación Web*, *API Gateway*, *Microservicios de Catálogo, Carrito, Checkout, Reservas e Inventario*, *Bases de Datos PostgreSQL*, *Redis Cluster*, *OpenSearch* y *Apache Kafka*).
 - **Componentes ([c4/components.dsl](c4/components.dsl))**: Especificación C4 Nivel 3 para los componentes internos del *Servicio de Checkout* y el *Servicio de Reservas*.
+
+---
+
+## 📐 Requerimientos No Funcionales (`nfr/`)
+
+- **Punto 1 — 5 NFRs Iniciales**: [`nfr/punto 1 NFRs.docx`](nfr/punto%201%20NFRs.docx) | **[nfr.md](nfr/nfr.md)** (Escalabilidad 200k usuarios, Desempeño <300ms, Disponibilidad 99.95%, Consistencia/TTL 5 min, Persistencia Carrito 30 días).
 
 ---
 
@@ -50,7 +57,6 @@ agrodata/
 
 ---
 
-## 📐 Documentación Técnica (`docs/`)
+## ⚖️ Documentación de Trade-Offs (`docs/`)
 
-- **Punto 1 — 5 NFRs Iniciales**: [`docs/punto 1 NFRs.docx`](docs/punto%201%20NFRs.docx) | **[nfr.md](docs/nfr.md)** (Escalabilidad 200k usuarios, Desempeño <300ms, Disponibilidad 99.95%, Consistencia/TTL 5 min, Persistencia Carrito 30 días).
 - **Punto 4 — Análisis de Trade-Offs**: [`docs/punto 4 Trade-off.docx`](docs/punto%204%20Trade-off.docx) | **[trade-offs.md](docs/trade-offs.md)** (Atributos de Calidad y Matriz de Compromisos de ADRs).
