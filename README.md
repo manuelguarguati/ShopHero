@@ -13,14 +13,17 @@ agrodata/
 │   ├── containers.dsl                    # Nivel 2: Diagrama de Contenedores de ShopHero
 │   └── components.dsl                    # Nivel 3: Diagrama de Componentes (Checkout & Reservas)
 ├── adr/                                  # Architectural Decision Records (5 ADRs)
-│   ├── 0001-arquitectura-de-microservicios-desacoplados.md
-│   ├── 0002-uso-de-redis-cluster-para-carritos-y-reservas-temporales-con-ttl.md
-│   ├── 0003-bus-de-eventos-con-apache-kafka-para-procesamiento-asincrono.md
-│   ├── 0004-desacoplamiento-de-catalogo-y-busqueda-con-opensearch.md
-│   └── 0005-integracion-de-pasarela-de-pago-externa-mediante-tokenizacion.md
+│   ├── punto 3 ADRs.docx                 # Documento Word de ADRs (Punto 3)
+│   ├── 0001-separar-navegacion-y-busqueda-del-checkout-e-inventario.md
+│   ├── 0002-utilizar-redis-con-ttl-para-las-reservas-temporales-de-inventario.md
+│   ├── 0003-utilizar-kafka-y-consistencia-eventual-entre-los-servicios.md
+│   ├── 0004-utilizar-redis-cluster-para-carritos-persistentes.md
+│   └── 0005-utilizar-postgresql-y-patron-transactional-outbox-para-confirmar-pedidos.md
 ├── docs/                                 # Documentación del Proyecto
-│   ├── nfr.md                            # 5 Requerimientos No Funcionales (NFRs)
-│   └── trade-offs.md                     # Análisis de Trade-Offs y Atributos de Calidad
+│   ├── punto 1 NFRs.docx                 # Documento Word de NFRs (Punto 1)
+│   ├── punto 4 Trade-off.docx            # Documento Word de Trade-offs (Punto 4)
+│   ├── nfr.md                            # 5 Requerimientos No Funcionales (NFRs en Markdown)
+│   └── trade-offs.md                     # Análisis de Trade-Offs (Markdown)
 └── README.md                             # Documento Principal
 ```
 
@@ -36,15 +39,18 @@ agrodata/
 
 ## 📜 5 Registros de Decisiones de Arquitectura (`adr/`)
 
-1. **[ADR-0001: Arquitectura de Microservicios Desacoplados](adr/0001-arquitectura-de-microservicios-desacoplados.md)**
-2. **[ADR-0002: Uso de Redis Cluster para Carritos y Reservas Temporales con TTL](adr/0002-uso-de-redis-cluster-para-carritos-y-reservas-temporales-con-ttl.md)**
-3. **[ADR-0003: Bus de Eventos con Apache Kafka para Procesamiento Asíncrono](adr/0003-bus-de-eventos-con-apache-kafka-para-procesamiento-asincrono.md)**
-4. **[ADR-0004: Desacoplamiento del Catálogo de Productos y Búsqueda con OpenSearch](adr/0004-desacoplamiento-de-catalogo-y-busqueda-con-opensearch.md)**
-5. **[ADR-0005: Integración de Pasarela de Pago Externa mediante Tokenización](adr/0005-integracion-de-pasarela-de-pago-externa-mediante-tokenizacion.md)**
+* **Documento Word Original**: [`adr/punto 3 ADRs.docx`](adr/punto%203%20ADRs.docx)
+
+### Índice de ADRs en Markdown:
+1. **[ADR-001: Separar Navegación y Búsqueda del Proceso de Checkout e Inventario](adr/0001-separar-navegacion-y-busqueda-del-checkout-e-inventario.md)**
+2. **[ADR-002: Utilizar Redis con TTL para las Reservas Temporales de Inventario](adr/0002-utilizar-redis-con-ttl-para-las-reservas-temporales-de-inventario.md)**
+3. **[ADR-003: Utilizar Kafka y Consistencia Eventual entre los Servicios](adr/0003-utilizar-kafka-y-consistencia-eventual-entre-los-servicios.md)**
+4. **[ADR-004: Utilizar Redis Cluster para Carritos Persistentes](adr/0004-utilizar-redis-cluster-para-carritos-persistentes.md)**
+5. **[ADR-005: Utilizar PostgreSQL y Patrón Transactional Outbox para Confirmar Pedidos](adr/0005-utilizar-postgresql-y-patron-transactional-outbox-para-confirmar-pedidos.md)**
 
 ---
 
 ## 📐 Documentación Técnica (`docs/`)
 
-- **[5 NFRs Iniciales (docs/nfr.md)](docs/nfr.md)**: Especificación de Alta Concurrencia (50k usuarios), Disponibilidad (SLA 99.99%), Consistencia de Reservas con Redis TTL, Escalabilidad Horizontal y Seguridad PCI-DSS.
-- **[Análisis de Trade-Offs (docs/trade-offs.md)](docs/trade-offs.md)**: Respuesta detallada a las preguntas del Taller #1 sobre atributos de calidad reflejados en C4 y la balanza de compromisos de cada ADR.
+- **Punto 1 — 5 NFRs Iniciales**: [`docs/punto 1 NFRs.docx`](docs/punto%201%20NFRs.docx) | **[nfr.md](docs/nfr.md)** (Escalabilidad 200k usuarios, Desempeño <300ms, Disponibilidad 99.95%, Consistencia/TTL 5 min, Persistencia Carrito 30 días).
+- **Punto 4 — Análisis de Trade-Offs**: [`docs/punto 4 Trade-off.docx`](docs/punto%204%20Trade-off.docx) | **[trade-offs.md](docs/trade-offs.md)** (Atributos de Calidad y Matriz de Compromisos de ADRs).
