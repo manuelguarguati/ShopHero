@@ -1,75 +1,49 @@
-# Requerimientos No Funcionales (NFRs) - Plataforma AgroData
+# 5 Requerimientos No Funcionales (NFRs) - Proyecto ShopHero
 
-Este documento define las cualidades de calidad, restricciones operativas y atributos no funcionales que rigen la arquitectura y la implementación técnica de la plataforma **AgroData**.
-
----
-
-## 1. Rendimiento y Eficiencia de Recursos (Performance)
-
-* **1.1 Tiempo de Respuesta en Interfaces de Usuario**:
-  - El 95% de las solicitudes REST/gRPC a través del API Gateway deben responder en menos de **200 ms** bajo condiciones de carga normal.
-  - El renderizado inicial de mapas GIS interactivos y capas de lotes debe completarse en menos de **2.0 segundos**.
-* **1.2 Capacidad de Ingesta IoT**:
-  - El microservicio de ingesta IoT debe ser capaz de procesar un flujo de al menos **5,000 lecturas por segundo** de sensores distribuidos sin pérdidas de paquetes ni degradación de latencia.
-* **1.3 Procesamiento Analítico**:
-  - El cálculo de índices de vegetación (NDVI) e integración de imágenes satelitales multiespectrales debe ejecutarse en menos de **5.0 segundos** por lote agrícola.
+Este documento define los 5 Atributos de Calidad iniciales desarrollados para la plataforma e-commerce de alta concurrencia **ShopHero** como parte del **Taller #1 de Arquitectura de Software**.
 
 ---
 
-## 2. Disponibilidad y Confiabilidad (Availability & Reliability)
+## 1. NFR-01: Alta Concurrencia y Rendimiento (Performance & Concurrency)
 
-* **2.1 Acuerdo de Nivel de Servicio (SLA)**:
-  - La plataforma debe garantizar una disponibilidad del **99.9% (3 naves)** en ambiente de producción (tiempo máximo de inactividad no planificada < 8.76 horas al año).
-* **2.2 Operación Móvil Offline (Offline-First)**:
-  - La aplicación móvil debe permitir al agricultor registrar labores de campo, tomar fotografías y consultar polígonos de lotes sin conectividad a Internet en zonas rurales.
-  - Sincronización automática bidireccional en segundo plano una vez que el dispositivo detecte conectividad a red celular o Wi-Fi.
-* **2.3 Recuperación ante Desastres (DRP)**:
-  - **RPO (Recovery Point Objective)**: Máximo 1 hora de datos perdidos ante un evento catastrófico.
-  - **RTO (Recovery Time Objective)**: Tiempo máximo de restauración total del servicio < 4 horas.
-  - Backups automatizados diarios e incrementales cada hora para la base de datos PostgreSQL (PostGIS + TimescaleDB).
+* **Descripción**: La plataforma debe responder eficientemente ante ráfagas extremas de tráfico durante ventas flash y eventos de tipo Black Friday.
+* **Métricas**:
+  - Soporte comprobado de hasta **50,000 usuarios concurrentes** simultáneos.
+  - Tiempo de respuesta del API Gateway y Servicio de Catálogo **< 200 ms** en el percentil 95 (p95) para búsquedas y lecturas de productos.
+  - Tiempo de procesamiento del checkout **< 800 ms** desde el envío del pedido hasta la solicitud a la pasarela de pago.
 
 ---
 
-## 3. Escalabilidad (Scalability)
+## 2. NFR-02: Disponibilidad y Resiliencia (Availability & Fault Tolerance)
 
-* **3.1 Escalado Horizontal de Servicios**:
-  - Módulos de ingesta IoT, API Gateway y motor de notificaciones deben configurarse con auto-escalado horizontal basado en métricas de CPU (>70%) y longitud de colas de mensajes en el Broker.
-* **3.2 Gestión de Series Temporales e Históricos**:
-  - La base de datos TimescaleDB debe aplicar políticas automáticas de compresión para lecturas de sensores con antigüedad mayor a 30 días, reduciendo el almacenamiento hasta en un 90%.
-  - Retención configurable de datos crudos por 1 año y datos agregados (promedios diarios/horarios) por 5 años.
-
----
-
-## 4. Seguridad y Privacidad (Security & Compliance)
-
-* **4.1 Autenticación y Autorización**:
-  - Implementación de protocolo **OAuth2 / OpenID Connect** utilizando JSON Web Tokens (JWT) firmados con rotación de llaves (RS256).
-  - Control de Acceso Basado en Roles (**RBAC**): Perfiles segregados para *Agricultor*, *Agrónomo* y *Administrador de Sistema*.
-* **4.2 Cifrado de Datos**:
-  - **En Tránsito**: Protocolo TLS 1.3 obligatorio para todas las comunicaciones HTTP/S, gRPC y MQTTs.
-  - **En Reposo**: Cifrado de volúmenes de base de datos y respaldos utilizando algoritmo **AES-256**.
-* **4.3 Propiedad y Privacidad de Datos Agrícolas**:
-  - Cumplimiento con reglamentos de protección de datos personales (GDPR / normativas locales).
-  - Aislamiento lógico estricto por cliente/finca (Multi-tenancy isolation), garantizando que los datos de rendimiento y delimitación de lotes de un agricultor sean inaccesibles para terceros.
+* **Descripción**: El sistema debe mantener una operación ininterrumpida durante eventos comerciales críticos, aislando fallos de componentes secundarios.
+* **Métricas**:
+  - Acuerdo de Nivel de Servicio (**SLA**) de **99.99% de disponibilidad** durante los eventos de venta flash.
+  - **Degradación Graciosa (Graceful Degradation)**: Si el índice de búsqueda (OpenSearch) sufre una falla, el sistema debe degradar a consultas básicas de base de datos sin interrumpir el flujo transaccional de carrito y pago.
 
 ---
 
-## 5. Mantenibilidad y Observabilidad (Maintainability & Observability)
+## 3. NFR-03: Consistencia de Datos y Control de Concurrencia (Data Consistency)
 
-* **5.1 Trazabilidad de Arquitectura**:
-  - Todos los modelos conceptuales y de contenedores deben mantenerse en código mediante el estándar **C4 Model (Structurizr DSL)** en la carpeta `c4/`.
-  - Cambios significativos de diseño deben documentarse mediante ADRs en la carpeta `adr/`.
-* **5.2 Monitoreo y Telemetría Centralizada**:
-  - Exportación de métricas mediante Prometheus y visualización de tableros de salud en Grafana.
-  - Logs estructurados en formato JSON agregados de forma centralizada.
-  - Rastreo distribuido de peticiones mediante **OpenTelemetry**.
+* **Descripción**: El sistema debe prevenir el sobrestock (overselling) de productos con alta demanda y bajo inventario mediante reservas temporales eficientes.
+* **Métricas**:
+  - Las reservas temporales creadas en Redis Cluster deben tener una expiración estricta por **TTL de 10 minutos**. Si el cliente no completa la compra en este lapso, el stock reservado se libera automáticamente de forma atómica.
+  - Consistencia eventual garantizada mediante eventos en Apache Kafka en menos de **1.0 segundo** entre la actualización de inventario real y el catálogo público.
 
 ---
 
-## 6. Interoperabilidad y Estándares (Interoperability)
+## 4. NFR-04: Escalabilidad Horizontal (Horizontal Scalability)
 
-* **6.1 Estándares Agrícolas y GIS**:
-  - Exportación e importación de polígonos de campos compatibles con formatos **GeoJSON**, **KML** y **Shapefile**.
-  - Cumplimiento de estándares de Open Geospatial Consortium (**OGC WMS/WFS**) para capas de mapas.
-* **6.2 Documentación de APIs**:
-  - Exposición de APIs REST documentadas bajo la especificación **OpenAPI v3.0 (Swagger)**.
+* **Descripción**: Los microservicios centrales deben poder adaptarse dinámicamente a las variaciones masivas de carga de trabajo de manera independiente.
+* **Métricas**:
+  - Capacidad de auto-escalado horizontal de los contenedores de *Checkout*, *Carrito* y *Reservas* en menos de **60 segundos** ante un consumo de CPU superior al 70%.
+  - Aplicación de arquitectura CQRS (Command Query Responsibility Segregation) permitiendo que la navegación masiva no impacte el rendimiento de la base de datos de pedidos.
+
+---
+
+## 5. NFR-05: Seguridad y Procesamiento de Pagos (Security & Compliance)
+
+* **Descripción**: Protección estricta de la información personal de los usuarios y cumplimiento de normativas financieras para transacciones bancarias.
+* **Métricas**:
+  - Cumplimiento **PCI-DSS Level 1**: Ningún dato sensible de tarjeta de crédito (PAN/CVV) debe almacenarse en las bases de datos internas de ShopHero, delegando el cobro y la tokenización a la Pasarela de Pago externa.
+  - Autenticación mediante **OAuth 2.0 / JWT** con cifrado en tránsito **TLS 1.3** obligatorio para todas las comunicaciones API.
