@@ -1,0 +1,4 @@
+node_modules/
+coverage/
+microservicio-productos/node_modules/
+microservicio-productos/coverage/

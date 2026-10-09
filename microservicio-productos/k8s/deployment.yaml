@@ -1,0 +1,46 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: microservicio-productos
+  labels:
+    app: microservicio-productos
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: microservicio-productos
+  template:
+    metadata:
+      labels:
+        app: microservicio-productos
+    spec:
+      containers:
+        - name: microservicio-productos
+          # Para minikube: imagen local (imagePullPolicy: Never).
+          # En el pipeline este valor se reemplaza por la imagen del registro.
+          image: microservicio-productos:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 3000
+          env:
+            - name: PORT
+              value: "3000"
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 3000
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 3000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 250m
+              memory: 128Mi

@@ -60,3 +60,22 @@ agrodata/
 ## ⚖️ Documentación de Trade-Offs (`docs/`)
 
 - **Punto 4 — Análisis de Trade-Offs**: [`docs/punto 4 Trade-off.docx`](docs/punto%204%20Trade-off.docx) | **[trade-offs.md](docs/trade-offs.md)** (Atributos de Calidad y Matriz de Compromisos de ADRs).
+
+---
+
+## Ejecutar el microservicio de productos con Docker
+
+El microservicio está en [`microservicio-productos/`](microservicio-productos/). Con Docker Desktop y Docker Compose instalados, ejecuta desde la raíz del repositorio:
+
+```bash
+docker compose up --build
+```
+
+La API queda disponible en `http://localhost:3000`. Para comprobarla:
+
+```bash
+curl http://localhost:3000/health
+curl http://localhost:3000/api/productos
+```
+
+Para detener el contenedor, ejecuta `docker compose down`. Consulta el [README del microservicio](microservicio-productos/README.md) para ejecutarlo sin Docker.

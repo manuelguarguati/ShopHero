@@ -1,0 +1,8 @@
+services:
+  productos:
+    build:
+      context: ./microservicio-productos
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
