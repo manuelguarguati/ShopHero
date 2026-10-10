@@ -25,6 +25,8 @@ agrodata/
 ├── docs/                                 # Documentación de Trade-Offs del Proyecto
 │   ├── punto 4 Trade-off.docx            # Documento Word de Trade-offs (Punto 4)
 │   └── trade-offs.md                     # Análisis de Trade-Offs (Markdown)
+├── microservicio-productos/              # Microservicio existente de productos
+├── microservicio-carrito/                # Microservicio de carrito (Fase 1)
 └── README.md                             # Documento Principal
 ```
 
@@ -63,19 +65,63 @@ agrodata/
 
 ---
 
-## Ejecutar el microservicio de productos con Docker
+## Fase 1: carrito y Redis con Docker Compose
 
-El microservicio está en [`microservicio-productos/`](microservicio-productos/). Con Docker Desktop y Docker Compose instalados, ejecuta desde la raíz del repositorio:
+Esta fase incorpora el microservicio de carrito y Redis al entorno Compose. Desde la raíz del repositorio, con Docker Desktop y Docker Compose instalados, ejecuta:
 
 ```bash
 docker compose up --build
 ```
 
-La API queda disponible en `http://localhost:3000`. Para comprobarla:
+El servicio de productos queda en `http://localhost:3000` y el carrito en `http://localhost:3001`. Redis solo se expone dentro de la red de Compose; sus datos se conservan en el volumen `redis-data`.
+
+Prueba el estado del servicio, consulta un carrito vacío, agrega un producto y vuelve a consultarlo:
+
+```bash
+curl http://localhost:3001/health
+curl http://localhost:3001/api/carritos/usuario1
+curl -X POST http://localhost:3001/api/carritos/usuario1/productos \
+  -H "Content-Type: application/json" \
+  -d "{\"productoId\":\"teclado\",\"cantidad\":2}"
+curl http://localhost:3001/api/carritos/usuario1
+```
+
+Para quitar un producto o vaciar el carrito:
+
+```bash
+curl -X DELETE http://localhost:3001/api/carritos/usuario1/productos/teclado
+curl -X DELETE http://localhost:3001/api/carritos/usuario1
+```
+
+Los carritos se guardan como hashes de Redis y agregar productos renueva un TTL de 30 días. Redis usa AOF para persistencia local. Para ejecutar las pruebas del servicio:
+
+```bash
+cd microservicio-carrito
+npm ci
+npm test
+```
+
+Para detener los contenedores sin borrar los datos:
+
+```bash
+docker compose down
+```
+
+Para eliminar también los datos persistidos en Redis:
+
+```bash
+docker compose down --volumes
+```
+
+### Redis simple en esta fase
+
+La arquitectura documentada en el ADR-004 propone Redis Cluster. Por el alcance aprobado para esta implementación, esta fase utiliza **una instancia simple de Redis**, no un clúster. Esto simplifica el entorno de desarrollo local, pero no proporciona la alta disponibilidad, tolerancia a fallos ni escalado horizontal de Redis Cluster; por tanto, no debe considerarse una implementación equivalente a ese ADR para producción.
+
+El microservicio existente de productos sigue disponible en [`microservicio-productos/`](microservicio-productos/). Sus endpoints se pueden verificar con:
 
 ```bash
 curl http://localhost:3000/health
 curl http://localhost:3000/api/productos
 ```
 
-Para detener el contenedor, ejecuta `docker compose down`. Consulta el [README del microservicio](microservicio-productos/README.md) para ejecutarlo sin Docker.
+Consulta el [README del microservicio](microservicio-productos/README.md) para ejecutarlo sin Docker.
