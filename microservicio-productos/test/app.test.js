@@ -11,6 +11,19 @@ describe('GET /health', () => {
   });
 });
 
+describe('GET /metrics', () => {
+  it('expone métricas Prometheus HTTP y del proceso Node', async () => {
+    await request(app).get('/health');
+    const res = await request(app).get('/metrics');
+
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['content-type']).toContain('text/plain');
+    expect(res.text).toContain('http_requests_total');
+    expect(res.text).toContain('http_request_duration_seconds_bucket');
+    expect(res.text).toContain('process_resident_memory_bytes');
+  });
+});
+
 describe('API de productos', () => {
   it('lista los productos', async () => {
     const res = await request(app).get('/api/productos');

@@ -1,4 +1,5 @@
 const express = require('express');
+const { exposeMetrics, logger, measureRequests, requestLogger } = require('./observability');
 
 const CART_TTL_SECONDS = 30 * 24 * 60 * 60;
 const ID_PATTERN = /^[a-zA-Z0-9_-]{1,100}$/;
@@ -6,6 +7,8 @@ const ID_PATTERN = /^[a-zA-Z0-9_-]{1,100}$/;
 function createApp(redis) {
   const app = express();
   app.use(express.json());
+  app.use(requestLogger);
+  app.use(measureRequests);
 
   // Redis stores each cart as a hash: product ID -> quantity.
   app.get('/health', async (req, res) => {
@@ -13,10 +16,12 @@ function createApp(redis) {
       await redis.ping();
       res.status(200).json({ estado: 'ok' });
     } catch (error) {
-      console.error('Health check de Redis falló:', error);
+      req.log.error({ err: error }, 'Health check de Redis falló');
       res.status(503).json({ error: 'Redis no está disponible' });
     }
   });
+
+  app.get('/metrics', exposeMetrics);
 
   app.get('/api/carritos/:usuarioId', async (req, res) => {
     const { usuarioId } = req.params;
@@ -32,7 +37,7 @@ function createApp(redis) {
       }));
       res.json({ usuarioId, productos });
     } catch (error) {
-      reportRedisError(res, error);
+      reportRedisError(req, res, error);
     }
   });
 
@@ -54,7 +59,7 @@ function createApp(redis) {
         .exec();
       res.status(200).json({ usuarioId, productoId, cantidad });
     } catch (error) {
-      reportRedisError(res, error);
+      reportRedisError(req, res, error);
     }
   });
 
@@ -72,7 +77,7 @@ function createApp(redis) {
         .exec();
       res.status(204).end();
     } catch (error) {
-      reportRedisError(res, error);
+      reportRedisError(req, res, error);
     }
   });
 
@@ -86,7 +91,7 @@ function createApp(redis) {
       await redis.del(cartKey(usuarioId));
       res.status(204).end();
     } catch (error) {
-      reportRedisError(res, error);
+      reportRedisError(req, res, error);
     }
   });
 
@@ -101,8 +106,8 @@ function isValidId(value) {
   return ID_PATTERN.test(value);
 }
 
-function reportRedisError(res, error) {
-  console.error('Error al acceder a Redis:', error);
+function reportRedisError(req, res, error) {
+  req.log.error({ err: error }, 'Error al acceder a Redis');
   res.status(503).json({ error: 'No se pudo completar la operación del carrito' });
 }
 

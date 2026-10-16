@@ -1,0 +1,11 @@
+apiVersion: 1
+
+providers:
+  - name: ShopHero
+    orgId: 1
+    folder: ShopHero
+    type: file
+    disableDeletion: true
+    editable: false
+    options:
+      path: /var/lib/grafana/dashboards

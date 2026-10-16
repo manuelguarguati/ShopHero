@@ -23,6 +23,18 @@ function createRedisMock() {
 }
 
 describe('API de carrito', () => {
+  it('expone métricas Prometheus HTTP y del proceso Node', async () => {
+    const { redis } = createRedisMock();
+    await request(createApp(redis)).get('/health');
+    const response = await request(createApp(redis)).get('/metrics');
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers['content-type']).toContain('text/plain');
+    expect(response.text).toContain('http_requests_total');
+    expect(response.text).toContain('http_request_duration_seconds_bucket');
+    expect(response.text).toContain('process_resident_memory_bytes');
+  });
+
   it('comprueba que Redis está disponible', async () => {
     const { redis } = createRedisMock();
     const response = await request(createApp(redis)).get('/health');

@@ -1,0 +1,17 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: productos
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["productos:3000"]
+        labels:
+          service: productos
+  - job_name: carrito
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["carrito:3001"]
+        labels:
+          service: carrito

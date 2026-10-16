@@ -1,7 +1,10 @@
+require('./telemetry');
+
 const app = require('./app');
+const { logger } = require('./observability');
 
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
-  console.log(`Microservicio escuchando en el puerto ${PORT}`);
+  logger.info({ port: PORT }, 'Microservicio de productos iniciado');
 });

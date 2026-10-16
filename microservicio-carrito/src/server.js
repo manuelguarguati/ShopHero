@@ -1,23 +1,26 @@
+require('./telemetry');
+
 const { createClient } = require('redis');
 const { createApp } = require('./app');
+const { logger } = require('./observability');
 
 const PORT = process.env.PORT || 3001;
 const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379';
 const redis = createClient({ url: REDIS_URL });
 
 redis.on('error', (error) => {
-  console.error('Error de conexión con Redis:', error);
+  logger.error({ err: error }, 'Error de conexión con Redis');
 });
 
 async function start() {
   await redis.connect();
   const app = createApp(redis);
   app.listen(PORT, () => {
-    console.log(`Microservicio de carrito escuchando en el puerto ${PORT}`);
+    logger.info({ port: PORT }, 'Microservicio de carrito iniciado');
   });
 }
 
 start().catch((error) => {
-  console.error('No se pudo iniciar el microservicio de carrito:', error);
+  logger.fatal({ err: error }, 'No se pudo iniciar el microservicio de carrito');
   process.exit(1);
 });

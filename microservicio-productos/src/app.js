@@ -1,7 +1,10 @@
 const express = require('express');
+const { exposeMetrics, measureRequests, requestLogger } = require('./observability');
 
 const app = express();
 app.use(express.json());
+app.use(requestLogger);
+app.use(measureRequests);
 
 // "Base de datos" en memoria (suficiente para el ejercicio)
 let productos = [
@@ -13,6 +16,8 @@ let productos = [
 app.get('/health', (req, res) => {
   res.status(200).json({ estado: 'ok' });
 });
+
+app.get('/metrics', exposeMetrics);
 
 app.get('/api/productos', (req, res) => {
   res.json(productos);
