@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: shophero-config
+data:
+  PRODUCTOS_PORT: "3000"
+  CARRITO_PORT: "3001"
+  REDIS_URL: redis://redis:6379
+  PRODUCTOS_URL: http://microservicio-productos:3000

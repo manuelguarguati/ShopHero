@@ -1,0 +1,60 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: microservicio-productos
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: microservicio-productos
+  template:
+    metadata:
+      labels:
+        app: microservicio-productos
+    spec:
+      containers:
+        - name: productos
+          image: ghcr.io/manuelguarguati/shophero/microservicio-productos:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 3000
+          env:
+            - name: PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: shophero-config
+                  key: PRODUCTOS_PORT
+            - name: JWT_PUBLIC_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: shophero-secrets
+                  key: jwt-public-key
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 3000
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 3000
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: microservicio-productos
+spec:
+  type: ClusterIP
+  selector:
+    app: microservicio-productos
+  ports:
+    - port: 3000
+      targetPort: 3000

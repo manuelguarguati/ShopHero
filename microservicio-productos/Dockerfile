@@ -1,17 +1,16 @@
-FROM node:20-alpine
-
+FROM node:20-alpine AS dependencies
 WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev
 
-# Instalar solo dependencias de producción (aprovecha la caché de capas)
-COPY package*.json ./
-RUN npm install --omit=dev
-
-COPY src ./src
-
-ENV PORT=3000
-EXPOSE 3000
-
-# Ejecutar como usuario sin privilegios
+FROM node:20-alpine AS runtime
+ENV NODE_ENV=production PORT=3000
+WORKDIR /app
+COPY --from=dependencies --chown=node:node /app/node_modules ./node_modules
+COPY --chown=node:node package.json ./
+COPY --chown=node:node src ./src
 USER node
-
+EXPOSE 3000
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+  CMD node -e "fetch('http://127.0.0.1:3000/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
 CMD ["node", "src/server.js"]
