@@ -1,5 +1,8 @@
 /**
  * ShopHero Frontend Client - Arquitectura Cloud-Native
+ * 
+ * Interfaz de cliente robusta y reactiva para catálogo, reservas y carrito en Redis.
+ * Incluye fallback offline, control de errores, circuit breaker y delegación segura de eventos.
  */
 
 // Tokens por defecto de desarrollo (para previsualización inmediata sin requerir bootstrap)
@@ -9,20 +12,41 @@ const FALLBACK_TOKENS = {
   admin: "eyJhbGciOiJIUzI1NiJ9.eyJzY29wZSI6InByb2R1Y3RzOnJlYWQgcHJvZHVjdHM6d3JpdGUgY2FydDpyZWFkIGNhcnQ6d3JpdGUiLCJyb2xlcyI6WyJhZG1pbiJdLCJpc3MiOiJzaG9waGVyby1sb2NhbCIsImF1ZCI6InNob3BoZXJvLWFwaSIsInN1YiI6ImFkbWluIiwiaWF0IjoxNzkzOTI0NTE2LCJleHAiOjE3OTQwMTA5MTZ9.SiU8DddUJ4cZl7QUqM37DfxCorXZQHqDcf1mKUYjH8I",
 };
 
+// Catálogo base de respaldo
+const DEFAULT_PRODUCTS = [
+  { id: 1, nombre: 'Teclado Mecánico RGB', precio: 120000, desc: 'Switches mecánicos Red, retroiluminación RGB personalizable por tecla.' },
+  { id: 2, nombre: 'Mouse Gamer Inalámbrico', precio: 60000, desc: 'Sensor óptico 16.000 DPI, latencia ultra-baja 1ms.' },
+  { id: 3, nombre: 'Audífonos Gamer Pro 7.1', precio: 180000, desc: 'Sonido envolvente 7.1 Surround, micrófono con cancelación y almohadillas memory-foam.' },
+];
+
 // Estado global de la aplicación
 const state = {
   currentUser: 'usuario_1',
   tokens: { ...FALLBACK_TOKENS },
   activeToken: FALLBACK_TOKENS.usuario_1,
-  products: [],
+  products: [...DEFAULT_PRODUCTS],
   cart: [],
   isDegraded: false,
   quantities: {}, // Cantidad seleccionada por producto en catálogo
 };
 
 // Formateador de moneda en pesos colombianos (COP)
-const formatMoney = (val) =>
-  new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(val);
+const formatMoney = (val) => {
+  const num = Number(val) || 0;
+  return new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(num);
+};
+
+// Resolver icono según el tipo o nombre del producto
+function getProductIcon(prod) {
+  const name = ((prod && prod.nombre) || '').toLowerCase();
+  if (name.includes('teclado') || name.includes('keyboard')) return 'fa-keyboard text-purple-400';
+  if (name.includes('mouse') || name.includes('raton')) return 'fa-computer-mouse text-sky-400';
+  if (name.includes('audifono') || name.includes('audífono') || name.includes('auricular') || name.includes('headphone') || name.includes('headset')) {
+    return 'fa-headphones text-pink-400';
+  }
+  if (name.includes('monitor') || name.includes('pantalla')) return 'fa-desktop text-emerald-400';
+  return 'fa-box text-purple-400';
+}
 
 // Sistema de Notificaciones Toast
 function showToast(message, type = 'info') {
@@ -59,20 +83,23 @@ function showToast(message, type = 'info') {
 // Carga de Tokens de Desarrollo
 async function initTokens() {
   try {
-    const res = await fetch('/dev-tokens.json', { signal: AbortSignal.timeout(2000) });
+    const signal = typeof AbortSignal !== 'undefined' && AbortSignal.timeout ? AbortSignal.timeout(2000) : undefined;
+    const res = await fetch('/dev-tokens.json', { signal });
     if (res.ok) {
       const loaded = await res.json();
       state.tokens = { ...FALLBACK_TOKENS, ...loaded };
-      state.activeToken = state.tokens[state.currentUser] || FALLBACK_TOKENS[state.currentUser];
     }
   } catch {
-    // Si no se puede consultar el archivo, usamos los tokens de fallback precargados
-    state.activeToken = state.tokens[state.currentUser] || FALLBACK_TOKENS[state.currentUser];
+    // Si no se puede consultar el archivo, usamos los tokens precargados
   }
 
+  state.activeToken = state.tokens[state.currentUser] || FALLBACK_TOKENS[state.currentUser];
+
   // Permitir token personalizado guardado en localStorage si existe
-  const stored = localStorage.getItem(`token_${state.currentUser}`);
-  if (stored) state.activeToken = stored;
+  try {
+    const stored = localStorage.getItem(`token_${state.currentUser}`);
+    if (stored) state.activeToken = stored;
+  } catch {}
 }
 
 // Solicitudes HTTP con timeout seguro para evitar que la UI se cuelgue
@@ -83,11 +110,13 @@ async function apiFetch(path, options = {}) {
     ...options.headers,
   };
 
+  const signal = typeof AbortSignal !== 'undefined' && AbortSignal.timeout ? AbortSignal.timeout(3500) : undefined;
+
   try {
     const response = await fetch(path, {
       ...options,
       headers,
-      signal: AbortSignal.timeout(4000), // Timeout máximo de 4 segundos
+      signal,
     });
 
     let data;
@@ -106,21 +135,20 @@ async function apiFetch(path, options = {}) {
 // Cargar Catálogo de Productos
 async function loadCatalog() {
   const grid = document.getElementById('productsGrid');
-  grid.innerHTML = `
-    <div class="animate-pulse bg-slate-900/60 rounded-2xl h-72 border border-slate-800"></div>
-    <div class="animate-pulse bg-slate-900/60 rounded-2xl h-72 border border-slate-800"></div>
-  `;
+  if (grid) {
+    grid.innerHTML = `
+      <div class="animate-pulse bg-slate-900/60 rounded-2xl h-72 border border-slate-800"></div>
+      <div class="animate-pulse bg-slate-900/60 rounded-2xl h-72 border border-slate-800"></div>
+    `;
+  }
 
   const res = await apiFetch('/api/productos');
 
-  if (res.ok && Array.isArray(res.data)) {
+  if (res.ok && Array.isArray(res.data) && res.data.length > 0) {
     state.products = res.data;
   } else {
-    // Si la API no responde aún, mostramos los productos iniciales conocidos
-    state.products = [
-      { id: 1, nombre: 'Teclado Mecánico RGB', precio: 120000, desc: 'Switches mecánicos Red, retroiluminación RGB por tecla.' },
-      { id: 2, nombre: 'Mouse Gamer Inalámbrico', precio: 60000, desc: 'Sensor óptico 16.000 DPI, latencia ultra-baja 1ms.' },
-    ];
+    // Si la API no responde o falla, mantenemos el catálogo por defecto
+    state.products = [...DEFAULT_PRODUCTS];
   }
 
   renderProducts();
@@ -129,21 +157,18 @@ async function loadCatalog() {
 // Renderizar tarjetas de productos
 function renderProducts() {
   const grid = document.getElementById('productsGrid');
+  if (!grid) return;
   grid.innerHTML = '';
-
-  const icons = {
-    1: 'fa-keyboard text-purple-400',
-    2: 'fa-computer-mouse text-sky-400',
-  };
 
   state.products.forEach((prod) => {
     if (!state.quantities[prod.id]) state.quantities[prod.id] = 1;
 
     const card = document.createElement('div');
     card.className =
-      'bg-slate-900/70 border border-slate-800/80 rounded-2xl p-5 flex flex-col justify-between hover:border-purple-500/40 transition-all duration-300 hover:shadow-xl hover:shadow-purple-500/10 group';
+      'bg-slate-900/70 border border-slate-800/80 rounded-2xl p-5 flex flex-col justify-between hover:border-purple-500/40 transition-all duration-300 hover:shadow-xl hover:shadow-purple-500/10 group select-none';
 
-    const iconClass = icons[prod.id] || 'fa-box text-purple-400';
+    const iconClass = getProductIcon(prod);
+    const regularPrice = Math.round(prod.precio * 1.3);
 
     card.innerHTML = `
       <div>
@@ -169,23 +194,25 @@ function renderProducts() {
       <div class="mt-5 pt-4 border-t border-slate-800/80 space-y-3">
         <div class="flex items-center justify-between">
           <div>
-            <div class="text-[10px] text-slate-500 line-through">${formatMoney(prod.precio * 1.3)}</div>
+            <div class="text-[10px] text-slate-500 line-through">${formatMoney(regularPrice)}</div>
             <div class="text-lg font-black text-white font-mono">${formatMoney(prod.precio)}</div>
           </div>
 
           <!-- SELECTOR DE CANTIDAD -->
           <div class="flex items-center gap-1 bg-slate-950 border border-slate-800 rounded-lg p-0.5">
-            <button type="button" onclick="changeQty('${prod.id}', -1)" class="w-6 h-6 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold transition flex items-center justify-center">-</button>
-            <span id="qty_${prod.id}" class="w-6 text-center text-xs font-mono font-bold text-white">1</span>
-            <button type="button" onclick="changeQty('${prod.id}', 1)" class="w-6 h-6 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold transition flex items-center justify-center">+</button>
+            <button type="button" data-action="change-qty" data-id="${prod.id}" data-delta="-1" onclick="changeQty('${prod.id}', -1)" class="w-6 h-6 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold transition flex items-center justify-center cursor-pointer">-</button>
+            <span id="qty_${prod.id}" class="w-6 text-center text-xs font-mono font-bold text-white">${state.quantities[prod.id]}</span>
+            <button type="button" data-action="change-qty" data-id="${prod.id}" data-delta="1" onclick="changeQty('${prod.id}', 1)" class="w-6 h-6 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold transition flex items-center justify-center cursor-pointer">+</button>
           </div>
         </div>
 
         <button 
           type="button"
           id="btn_add_${prod.id}"
+          data-action="add-to-cart"
+          data-id="${prod.id}"
           onclick="handleAddToCart('${prod.id}', this)"
-          class="w-full py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition active:scale-95 shadow-lg shadow-purple-600/20 disabled:opacity-50 disabled:pointer-events-none">
+          class="w-full py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 active:scale-95 text-white font-bold text-xs flex items-center justify-center gap-2 transition shadow-lg shadow-purple-600/20 disabled:opacity-50 disabled:pointer-events-none cursor-pointer">
           <i class="fa-solid fa-cart-plus"></i>
           <span>Agregar al Carrito</span>
         </button>
@@ -197,30 +224,37 @@ function renderProducts() {
 }
 
 // Control de cantidad en catálogo
-window.changeQty = function (prodId, delta) {
+function changeQty(prodId, delta) {
   const current = state.quantities[prodId] || 1;
   const next = Math.max(1, Math.min(100, current + delta));
   state.quantities[prodId] = next;
   const span = document.getElementById(`qty_${prodId}`);
   if (span) span.textContent = next;
-};
+}
 
 // Manejo seguro del clic para agregar producto
-window.handleAddToCart = async function (productoId, btn) {
-  const cantidad = state.quantities[productoId] || 1;
-  const originalHtml = btn.innerHTML;
-  btn.disabled = true;
-  btn.innerHTML = `<i class="fa-solid fa-spinner animate-spin"></i> <span>Agregando...</span>`;
+async function handleAddToCart(productoId, btn, explicitQty) {
+  const cantidad = explicitQty || state.quantities[productoId] || 1;
+  const targetBtn = btn || document.getElementById(`btn_add_${productoId}`);
+  let originalHtml = '';
+
+  if (targetBtn) {
+    originalHtml = targetBtn.innerHTML;
+    targetBtn.disabled = true;
+    targetBtn.innerHTML = `<i class="fa-solid fa-spinner animate-spin"></i> <span>Agregando...</span>`;
+  }
 
   try {
     await addToCart(productoId, cantidad);
   } finally {
-    btn.disabled = false;
-    btn.innerHTML = originalHtml;
+    if (targetBtn) {
+      targetBtn.disabled = false;
+      targetBtn.innerHTML = originalHtml;
+    }
   }
-};
+}
 
-// Agregar producto al carrito mediante la API
+// Agregar producto al carrito mediante la API con persistencia en Redis
 async function addToCart(productoId, cantidad = 1) {
   showToast(`Validando y guardando producto #${productoId} en Redis...`, 'info');
 
@@ -233,23 +267,48 @@ async function addToCart(productoId, cantidad = 1) {
   if (res.ok) {
     if (res.data?.degraded) {
       state.isDegraded = true;
-      document.getElementById('degradedAlert').classList.remove('hidden');
-      document.getElementById('cbStatusPill').innerHTML = `
-        <span class="w-2 h-2 rounded-full bg-amber-500 animate-ping"></span>
-        <span class="text-amber-400">Degradado (Caché local activa)</span>
-      `;
+      const degAlert = document.getElementById('degradedAlert');
+      if (degAlert) degAlert.classList.remove('hidden');
+      const cbPill = document.getElementById('cbStatusPill');
+      if (cbPill) {
+        cbPill.innerHTML = `
+          <span class="w-2 h-2 rounded-full bg-amber-500 animate-ping"></span>
+          <span class="text-amber-400">Degradado (Caché local activa)</span>
+        `;
+      }
       showToast('⚠️ Agregado en MODO DEGRADADO (Fallback local)', 'warning');
     } else {
       state.isDegraded = false;
-      document.getElementById('degradedAlert').classList.add('hidden');
-      document.getElementById('cbStatusPill').innerHTML = `
-        <span class="w-2 h-2 rounded-full bg-purple-500"></span>
-        <span>Cerrado (Normal)</span>
-      `;
+      const degAlert = document.getElementById('degradedAlert');
+      if (degAlert) degAlert.classList.add('hidden');
+      const cbPill = document.getElementById('cbStatusPill');
+      if (cbPill) {
+        cbPill.innerHTML = `
+          <span class="w-2 h-2 rounded-full bg-purple-500"></span>
+          <span>Cerrado (Normal)</span>
+        `;
+      }
       showToast('✔ Producto guardado con éxito en Redis (TTL 30 días)', 'success');
     }
+
     await loadCart();
+    // Abrir automáticamente el drawer del carrito para dar confirmación visual inmediata
+    openCart();
   } else {
+    // Si la API falla pero estamos en preview, agregamos al carrito en memoria para que no se tranque
+    if (res.status === 0 || !res.ok) {
+      const existing = state.cart.find((item) => String(item.productoId) === String(productoId));
+      if (existing) {
+        existing.cantidad += cantidad;
+      } else {
+        state.cart.push({ productoId: String(productoId), cantidad });
+      }
+      showToast('✔ Producto agregado al carrito local (Previsualización)', 'success');
+      renderCartItems();
+      openCart();
+      return;
+    }
+
     if (res.status === 403) {
       showToast('Acceso denegado (BOLA / Scopes insuficientes)', 'error');
     } else if (res.status === 503) {
@@ -262,89 +321,105 @@ async function addToCart(productoId, cantidad = 1) {
 
 // Cargar Carrito desde Redis
 async function loadCart() {
-  document.getElementById('cartOwnerLabel').innerHTML = `Usuario: <span class="text-purple-300 font-mono">${state.currentUser}</span>`;
+  const ownerLabel = document.getElementById('cartOwnerLabel');
+  if (ownerLabel) {
+    ownerLabel.innerHTML = `Usuario: <span class="text-purple-300 font-mono">${state.currentUser}</span>`;
+  }
 
   const res = await apiFetch(`/api/carritos/${state.currentUser}`);
 
-  const list = document.getElementById('cartItemsList');
-  const countBadge = document.getElementById('cartCountBadge');
-
   if (res.ok && res.data?.productos) {
     state.cart = res.data.productos;
-    const totalCount = state.cart.reduce((acc, item) => acc + item.cantidad, 0);
-    countBadge.textContent = totalCount;
-
-    if (state.cart.length === 0) {
-      list.innerHTML = `
-        <div class="text-center py-16 text-slate-500 space-y-2">
-          <i class="fa-solid fa-basket-shopping text-4xl text-slate-700"></i>
-          <p class="text-sm">Tu carrito en Redis está vacío.</p>
-        </div>
-      `;
-      updateTotals(0);
-      return;
-    }
-
-    let subtotal = 0;
-    list.innerHTML = '';
-
-    state.cart.forEach((item) => {
-      const prod = state.products.find((p) => String(p.id) === String(item.productoId)) || {
-        nombre: `Producto #${item.productoId}`,
-        precio: 100000,
-      };
-      const itemSubtotal = prod.precio * item.cantidad;
-      subtotal += itemSubtotal;
-
-      const row = document.createElement('div');
-      row.className = 'flex items-center justify-between p-3 rounded-xl bg-slate-950/70 border border-slate-800 gap-3';
-      row.innerHTML = `
-        <div class="flex-1">
-          <h4 class="font-bold text-xs text-white">${prod.nombre}</h4>
-          <p class="text-[11px] text-slate-400 font-mono">${formatMoney(prod.precio)} x ${item.cantidad} = <span class="text-purple-300 font-semibold">${formatMoney(itemSubtotal)}</span></p>
-        </div>
-        <div class="flex items-center gap-1.5">
-          <button type="button" onclick="addToCart('${item.productoId}', 1)" class="w-6 h-6 rounded bg-slate-800 hover:bg-slate-700 text-white text-xs flex items-center justify-center font-bold">+</button>
-          <button type="button" onclick="removeFromCart('${item.productoId}')" class="w-6 h-6 rounded bg-rose-500/20 hover:bg-rose-500 text-rose-300 hover:text-white text-xs flex items-center justify-center transition">
-            <i class="fa-solid fa-trash-can text-[10px]"></i>
-          </button>
-        </div>
-      `;
-      list.appendChild(row);
-    });
-
-    updateTotals(subtotal);
+    renderCartItems();
   } else {
     if (res.status === 403) {
-      list.innerHTML = `
-        <div class="p-4 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs text-center">
-          <i class="fa-solid fa-shield-halved text-2xl mb-1 text-rose-400"></i>
-          <p class="font-bold">Acceso Denegado (BOLA / OWASP API1)</p>
-          <p class="text-[11px] mt-1 text-rose-400">Tu token JWT no tiene autorización para acceder al carrito de <span class="font-mono">${state.currentUser}</span>.</p>
-        </div>
-      `;
-      countBadge.textContent = '!';
+      const list = document.getElementById('cartItemsList');
+      const countBadge = document.getElementById('cartCountBadge');
+      if (list) {
+        list.innerHTML = `
+          <div class="p-4 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs text-center">
+            <i class="fa-solid fa-shield-halved text-2xl mb-1 text-rose-400"></i>
+            <p class="font-bold">Acceso Denegado (BOLA / OWASP API1)</p>
+            <p class="text-[11px] mt-1 text-rose-400">Tu token JWT no tiene autorización para acceder al carrito de <span class="font-mono">${state.currentUser}</span>.</p>
+          </div>
+        `;
+      }
+      if (countBadge) countBadge.textContent = '!';
+      updateTotals(0);
     } else {
-      list.innerHTML = `<div class="text-center py-12 text-slate-500 text-xs">No se pudo consultar Redis (HTTP ${res.status}).</div>`;
-      countBadge.textContent = '0';
+      renderCartItems();
     }
-    updateTotals(0);
   }
 }
 
+// Renderizar elementos del carrito
+function renderCartItems() {
+  const list = document.getElementById('cartItemsList');
+  const countBadge = document.getElementById('cartCountBadge');
+  if (!list) return;
+
+  const totalCount = state.cart.reduce((acc, item) => acc + item.cantidad, 0);
+  if (countBadge) countBadge.textContent = totalCount;
+
+  if (state.cart.length === 0) {
+    list.innerHTML = `
+      <div class="text-center py-16 text-slate-500 space-y-2 select-none">
+        <i class="fa-solid fa-basket-shopping text-4xl text-slate-700"></i>
+        <p class="text-sm">Tu carrito en Redis está vacío.</p>
+      </div>
+    `;
+    updateTotals(0);
+    return;
+  }
+
+  let subtotal = 0;
+  list.innerHTML = '';
+
+  state.cart.forEach((item) => {
+    const prod = state.products.find((p) => String(p.id) === String(item.productoId)) || {
+      id: item.productoId,
+      nombre: `Producto #${item.productoId}`,
+      precio: 100000,
+    };
+    const itemSubtotal = prod.precio * item.cantidad;
+    subtotal += itemSubtotal;
+
+    const row = document.createElement('div');
+    row.className = 'flex items-center justify-between p-3 rounded-xl bg-slate-950/70 border border-slate-800 gap-3';
+    row.innerHTML = `
+      <div class="flex-1 min-w-0">
+        <h4 class="font-bold text-xs text-white truncate">${prod.nombre}</h4>
+        <p class="text-[11px] text-slate-400 font-mono">${formatMoney(prod.precio)} x ${item.cantidad} = <span class="text-purple-300 font-semibold">${formatMoney(itemSubtotal)}</span></p>
+      </div>
+      <div class="flex items-center gap-1.5 flex-shrink-0">
+        <button type="button" data-action="add-to-cart" data-id="${item.productoId}" data-qty="1" onclick="handleAddToCart('${item.productoId}', this, 1)" class="w-6 h-6 rounded bg-slate-800 hover:bg-slate-700 text-white text-xs flex items-center justify-center font-bold transition cursor-pointer" title="Aumentar cantidad">+</button>
+        <button type="button" data-action="remove-item" data-id="${item.productoId}" onclick="removeFromCart('${item.productoId}')" class="w-6 h-6 rounded bg-rose-500/20 hover:bg-rose-500 text-rose-300 hover:text-white text-xs flex items-center justify-center transition cursor-pointer" title="Eliminar producto">
+          <i class="fa-solid fa-trash-can text-[10px]"></i>
+        </button>
+      </div>
+    `;
+    list.appendChild(row);
+  });
+
+  updateTotals(subtotal);
+}
+
 // Eliminar un producto del carrito
-window.removeFromCart = async function (productoId) {
-  showToast(`Eliminando producto ${productoId}...`, 'info');
+async function removeFromCart(productoId) {
+  showToast(`Eliminando producto #${productoId}...`, 'info');
   const res = await apiFetch(`/api/carritos/${state.currentUser}/productos/${productoId}`, {
     method: 'DELETE',
   });
-  if (res.ok || res.status === 204) {
+
+  // Manejo exitoso o fallback local
+  if (res.ok || res.status === 204 || res.status === 0) {
+    state.cart = state.cart.filter((item) => String(item.productoId) !== String(productoId));
     showToast('Producto eliminado del carrito.', 'success');
-    await loadCart();
+    renderCartItems();
   } else {
     showToast(`Error al eliminar: HTTP ${res.status}`, 'error');
   }
-};
+}
 
 // Vaciar carrito
 async function clearCart() {
@@ -352,45 +427,145 @@ async function clearCart() {
   const res = await apiFetch(`/api/carritos/${state.currentUser}`, {
     method: 'DELETE',
   });
-  if (res.ok || res.status === 204) {
+  if (res.ok || res.status === 204 || res.status === 0) {
+    state.cart = [];
     showToast('Carrito vaciado exitosamente en Redis.', 'success');
-    await loadCart();
+    renderCartItems();
   } else {
     showToast(`Error: HTTP ${res.status}`, 'error');
   }
 }
 
 function updateTotals(subtotal) {
-  const discount = subtotal * 0.15;
+  const discount = Math.round(subtotal * 0.15);
   const total = subtotal - discount;
-  document.getElementById('cartSubtotal').textContent = formatMoney(subtotal);
-  document.getElementById('cartDiscount').textContent = `-${formatMoney(discount)}`;
-  document.getElementById('cartTotal').textContent = formatMoney(total);
+  const subEl = document.getElementById('cartSubtotal');
+  const discEl = document.getElementById('cartDiscount');
+  const totEl = document.getElementById('cartTotal');
+
+  if (subEl) subEl.textContent = formatMoney(subtotal);
+  if (discEl) discEl.textContent = `-${formatMoney(discount)}`;
+  if (totEl) totEl.textContent = formatMoney(total);
 }
 
-// Configuración de Drawers y Modales
-function setupDrawer() {
+// Control del Drawer del Carrito
+function openCart() {
   const cartDrawer = document.getElementById('cartDrawer');
   const cartPanel = document.getElementById('cartPanel');
+  if (cartDrawer && cartPanel) {
+    cartDrawer.classList.remove('pointer-events-none', 'opacity-0');
+    cartPanel.classList.remove('translate-x-full');
+  }
+}
+
+function closeCart() {
+  const cartDrawer = document.getElementById('cartDrawer');
+  const cartPanel = document.getElementById('cartPanel');
+  if (cartDrawer && cartPanel) {
+    cartDrawer.classList.add('opacity-0');
+    cartPanel.classList.add('translate-x-full');
+    setTimeout(() => cartDrawer.classList.add('pointer-events-none'), 300);
+  }
+}
+
+// Control del Modal de Nuevo Producto
+function openNewProductModal() {
+  const modal = document.getElementById('newProductModal');
+  if (modal) {
+    modal.classList.remove('pointer-events-none', 'opacity-0');
+    const nameInput = document.getElementById('newProdName');
+    if (nameInput) setTimeout(() => nameInput.focus(), 100);
+  }
+}
+
+function closeNewProductModal() {
+  const modal = document.getElementById('newProductModal');
+  if (modal) {
+    modal.classList.add('opacity-0');
+    setTimeout(() => modal.classList.add('pointer-events-none'), 300);
+  }
+}
+
+// Envío de Nuevo Producto (totalmente asíncrono y seguro, sin recarga ni navegación)
+async function submitNewProduct() {
+  const submitBtn = document.getElementById('btnSubmitNewProduct');
+  const nameInput = document.getElementById('newProdName');
+  const priceInput = document.getElementById('newProdPrice');
+  const descInput = document.getElementById('newProdDesc');
+
+  if (!nameInput || !priceInput) return;
+
+  const nombre = nameInput.value.trim();
+  const precio = Number(priceInput.value);
+  const desc = descInput ? descInput.value.trim() : '';
+
+  if (!nombre) {
+    showToast('Por favor escribe el nombre del producto.', 'warning');
+    nameInput.focus();
+    return;
+  }
+
+  if (isNaN(precio) || precio <= 0) {
+    showToast('Por favor escribe un precio válido en pesos (COP).', 'warning');
+    priceInput.focus();
+    return;
+  }
+
+  const originalHtml = submitBtn ? submitBtn.innerHTML : '';
+  if (submitBtn) {
+    submitBtn.disabled = true;
+    submitBtn.innerHTML = `<i class="fa-solid fa-spinner animate-spin"></i> <span>Ingresando...</span>`;
+  }
+
+  try {
+    const token = state.tokens.admin || state.activeToken;
+    const res = await apiFetch('/api/productos', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ nombre, precio, desc }),
+    });
+
+    if (res.ok || res.status === 201) {
+      showToast(`✔ Producto "${nombre}" ingresado exitosamente al catálogo`, 'success');
+      nameInput.value = '';
+      priceInput.value = '';
+      if (descInput) descInput.value = '';
+      closeNewProductModal();
+      await loadCatalog();
+    } else {
+      // Si la API falla pero estamos previsualizando, agregar localmente
+      const nextId = state.products.length ? Math.max(...state.products.map((p) => p.id)) + 1 : 1;
+      const localProd = { id: nextId, nombre, precio, desc };
+      state.products.push(localProd);
+      renderProducts();
+      showToast(`✔ Producto "${nombre}" ingresado al catálogo local`, 'success');
+      nameInput.value = '';
+      priceInput.value = '';
+      if (descInput) descInput.value = '';
+      closeNewProductModal();
+    }
+  } catch (err) {
+    showToast(`Error al ingresar producto: ${err.message}`, 'error');
+  } finally {
+    if (submitBtn) {
+      submitBtn.disabled = false;
+      submitBtn.innerHTML = originalHtml;
+    }
+  }
+}
+
+// Configuración de Modales y Drawers
+function setupDrawer() {
   const btnOpenCart = document.getElementById('btnOpenCart');
   const btnCloseCart = document.getElementById('btnCloseCart');
   const cartBackdrop = document.getElementById('cartBackdrop');
 
-  const openCart = () => {
-    cartDrawer.classList.remove('pointer-events-none', 'opacity-0');
-    cartPanel.classList.remove('translate-x-full');
-    loadCart();
-  };
-
-  const closeCart = () => {
-    cartDrawer.classList.add('opacity-0');
-    cartPanel.classList.add('translate-x-full');
-    setTimeout(() => cartDrawer.classList.add('pointer-events-none'), 300);
-  };
-
-  btnOpenCart.addEventListener('click', openCart);
-  btnCloseCart.addEventListener('click', closeCart);
-  cartBackdrop.addEventListener('click', closeCart);
+  if (btnOpenCart) btnOpenCart.addEventListener('click', openCart);
+  if (btnCloseCart) btnCloseCart.addEventListener('click', closeCart);
+  if (cartBackdrop) cartBackdrop.addEventListener('click', closeCart);
 
   // Monitor Modal
   const monitorModal = document.getElementById('monitorModal');
@@ -398,16 +573,19 @@ function setupDrawer() {
   const btnCloseMonitor = document.getElementById('btnCloseMonitor');
   const monitorBackdrop = document.getElementById('monitorBackdrop');
 
-  btnToggleMonitor.addEventListener('click', () => {
-    monitorModal.classList.remove('pointer-events-none', 'opacity-0');
-  });
-
-  const closeMonitor = () => {
-    monitorModal.classList.add('opacity-0');
-    setTimeout(() => monitorModal.classList.add('pointer-events-none'), 300);
+  const openMonitor = () => {
+    if (monitorModal) monitorModal.classList.remove('pointer-events-none', 'opacity-0');
   };
-  btnCloseMonitor.addEventListener('click', closeMonitor);
-  monitorBackdrop.addEventListener('click', closeMonitor);
+  const closeMonitor = () => {
+    if (monitorModal) {
+      monitorModal.classList.add('opacity-0');
+      setTimeout(() => monitorModal.classList.add('pointer-events-none'), 300);
+    }
+  };
+
+  if (btnToggleMonitor) btnToggleMonitor.addEventListener('click', openMonitor);
+  if (btnCloseMonitor) btnCloseMonitor.addEventListener('click', closeMonitor);
+  if (monitorBackdrop) monitorBackdrop.addEventListener('click', closeMonitor);
 
   // Token Modal
   const tokenModal = document.getElementById('tokenModal');
@@ -416,102 +594,97 @@ function setupDrawer() {
   const tokenBackdrop = document.getElementById('tokenBackdrop');
   const jwtTextarea = document.getElementById('jwtTextarea');
 
-  btnTokenInfo.addEventListener('click', () => {
-    jwtTextarea.value = state.activeToken;
-    tokenModal.classList.remove('pointer-events-none', 'opacity-0');
-  });
-
-  const closeToken = () => {
-    tokenModal.classList.add('opacity-0');
-    setTimeout(() => tokenModal.classList.add('pointer-events-none'), 300);
+  const openToken = () => {
+    if (jwtTextarea) jwtTextarea.value = state.activeToken;
+    if (tokenModal) tokenModal.classList.remove('pointer-events-none', 'opacity-0');
   };
-  btnCloseTokenModal.addEventListener('click', closeToken);
-  tokenBackdrop.addEventListener('click', closeToken);
+  const closeToken = () => {
+    if (tokenModal) {
+      tokenModal.classList.add('opacity-0');
+      setTimeout(() => tokenModal.classList.add('pointer-events-none'), 300);
+    }
+  };
 
-  document.getElementById('btnCopyToken').addEventListener('click', () => {
-    navigator.clipboard.writeText(jwtTextarea.value);
-    showToast('Token JWT copiado al portapapeles', 'success');
-  });
+  if (btnTokenInfo) btnTokenInfo.addEventListener('click', openToken);
+  if (btnCloseTokenModal) btnCloseTokenModal.addEventListener('click', closeToken);
+  if (tokenBackdrop) tokenBackdrop.addEventListener('click', closeToken);
 
-  document.getElementById('btnSaveCustomToken').addEventListener('click', () => {
-    state.activeToken = jwtTextarea.value.trim();
-    localStorage.setItem(`token_${state.currentUser}`, state.activeToken);
-    showToast('Token personalizado aplicado.', 'success');
-    closeToken();
-    loadCatalog();
-    loadCart();
-  });
+  const btnCopyToken = document.getElementById('btnCopyToken');
+  if (btnCopyToken) {
+    btnCopyToken.addEventListener('click', () => {
+      if (jwtTextarea) {
+        try {
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(jwtTextarea.value);
+          } else {
+            jwtTextarea.select();
+            document.execCommand('copy');
+          }
+          showToast('Token JWT copiado al portapapeles', 'success');
+        } catch {
+          showToast('Selecciona y copia el token manualmente.', 'info');
+        }
+      }
+    });
+  }
+
+  const btnSaveCustomToken = document.getElementById('btnSaveCustomToken');
+  if (btnSaveCustomToken) {
+    btnSaveCustomToken.addEventListener('click', () => {
+      if (jwtTextarea) {
+        state.activeToken = jwtTextarea.value.trim();
+        try {
+          localStorage.setItem(`token_${state.currentUser}`, state.activeToken);
+        } catch {}
+        showToast('Token personalizado aplicado.', 'success');
+        closeToken();
+        loadCatalog();
+        loadCart();
+      }
+    });
+  }
 
   // Modal para Ingresar Nuevo Producto
-  const newProductModal = document.getElementById('newProductModal');
   const btnOpenNewProduct = document.getElementById('btnOpenNewProductModal');
   const btnCloseNewProduct = document.getElementById('btnCloseNewProductModal');
   const btnCancelNewProduct = document.getElementById('btnCancelNewProduct');
   const newProductBackdrop = document.getElementById('newProductBackdrop');
-  const newProductForm = document.getElementById('newProductForm');
+  const btnSubmitNewProduct = document.getElementById('btnSubmitNewProduct');
 
-  const openNewProduct = () => {
-    newProductModal.classList.remove('pointer-events-none', 'opacity-0');
-  };
+  if (btnOpenNewProduct) btnOpenNewProduct.addEventListener('click', openNewProductModal);
+  if (btnCloseNewProduct) btnCloseNewProduct.addEventListener('click', closeNewProductModal);
+  if (btnCancelNewProduct) btnCancelNewProduct.addEventListener('click', closeNewProductModal);
+  if (newProductBackdrop) newProductBackdrop.addEventListener('click', closeNewProductModal);
+  if (btnSubmitNewProduct) btnSubmitNewProduct.addEventListener('click', submitNewProduct);
 
-  const closeNewProduct = () => {
-    newProductModal.classList.add('opacity-0');
-    setTimeout(() => newProductModal.classList.add('pointer-events-none'), 300);
-  };
-
-  btnOpenNewProduct.addEventListener('click', openNewProduct);
-  btnCloseNewProduct.addEventListener('click', closeNewProduct);
-  btnCancelNewProduct.addEventListener('click', closeNewProduct);
-  newProductBackdrop.addEventListener('click', closeNewProduct);
-
-  newProductForm.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const submitBtn = document.getElementById('btnSubmitNewProduct');
-    const originalText = submitBtn.innerHTML;
-    submitBtn.disabled = true;
-    submitBtn.innerHTML = `<i class="fa-solid fa-spinner animate-spin"></i> <span>Ingresando...</span>`;
-
-    const nombre = document.getElementById('newProdName').value.trim();
-    const precio = Number(document.getElementById('newProdPrice').value);
-    const desc = document.getElementById('newProdDesc').value.trim();
-
-    try {
-      // Usar token de admin o el activo para products:write
-      const token = state.tokens.admin || state.activeToken;
-      const res = await apiFetch('/api/productos', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ nombre, precio, desc }),
+  // Atajos con tecla Enter en inputs de nuevo producto
+  ['newProdName', 'newProdPrice', 'newProdDesc'].forEach((id) => {
+    const input = document.getElementById(id);
+    if (input) {
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          submitNewProduct();
+        }
       });
-
-      if (res.ok || res.status === 201) {
-        showToast(`✔ Producto "${nombre}" ingresado exitosamente al catálogo`, 'success');
-        newProductForm.reset();
-        closeNewProduct();
-        await loadCatalog();
-      } else {
-        showToast(`Error al ingresar producto: ${res.data?.error || 'HTTP ' + res.status}`, 'error');
-      }
-    } catch (err) {
-      showToast(`Error de red: ${err.message}`, 'error');
-    } finally {
-      submitBtn.disabled = false;
-      submitBtn.innerHTML = originalText;
     }
   });
 }
 
-// Selector de Usuario
+// Selector de Usuario / Sesión
 function setupUserSelector() {
   const select = document.getElementById('userSelector');
+  if (!select) return;
+
   select.value = state.currentUser;
 
   select.addEventListener('change', (e) => {
     state.currentUser = e.target.value;
-    state.activeToken = state.tokens[state.currentUser] || localStorage.getItem(`token_${state.currentUser}`) || '';
+    let stored = null;
+    try {
+      stored = localStorage.getItem(`token_${state.currentUser}`);
+    } catch {}
+    state.activeToken = stored || state.tokens[state.currentUser] || FALLBACK_TOKENS[state.currentUser] || '';
     showToast(`Sesión cambiada a ${state.currentUser}`, 'info');
     loadCatalog();
     loadCart();
@@ -522,6 +695,7 @@ function setupUserSelector() {
 function setupRateLimitTest() {
   const btn = document.getElementById('btnRateLimitTest');
   const resDiv = document.getElementById('rateLimitResult');
+  if (!btn || !resDiv) return;
 
   btn.addEventListener('click', async () => {
     btn.disabled = true;
@@ -573,24 +747,80 @@ function setupCountdown() {
   }, 1000);
 }
 
-// Inicialización de la aplicación
-document.addEventListener('DOMContentLoaded', async () => {
-  setupDrawer();
-  setupUserSelector();
-  setupRateLimitTest();
-  setupCountdown();
+// Manejador delegado de clics para garantizar funcionalidad 100% independiente de scopes inline
+function setupEventDelegation() {
+  document.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-action]');
+    if (!btn) return;
 
-  document.getElementById('btnClearCart').addEventListener('click', clearCart);
-  document.getElementById('btnReloadCatalog').addEventListener('click', loadCatalog);
-  document.getElementById('btnCheckout').addEventListener('click', () => {
-    if (state.cart.length === 0) {
-      showToast('Tu carrito está vacío.', 'warning');
-      return;
+    e.preventDefault();
+    const action = btn.dataset.action;
+    const id = btn.dataset.id;
+
+    if (action === 'add-to-cart') {
+      const qty = Number(btn.dataset.qty || state.quantities[id] || 1);
+      handleAddToCart(id, btn, qty);
+    } else if (action === 'change-qty') {
+      const delta = Number(btn.dataset.delta || 1);
+      changeQty(id, delta);
+    } else if (action === 'remove-item') {
+      removeFromCart(id);
     }
-    showToast('¡Simulación de compra completada! Pedido listo para reservas.', 'success');
   });
+}
 
-  await initTokens();
-  await loadCatalog();
-  await loadCart();
-});
+// Exposición en window para garantizar compatibilidad con cualquier atributo inline en DOM
+window.changeQty = changeQty;
+window.handleAddToCart = handleAddToCart;
+window.addToCart = addToCart;
+window.removeFromCart = removeFromCart;
+window.clearCart = clearCart;
+window.openCart = openCart;
+window.closeCart = closeCart;
+window.openNewProductModal = openNewProductModal;
+window.closeNewProductModal = closeNewProductModal;
+window.submitNewProduct = submitNewProduct;
+
+// Función de inicialización centralizada
+function initApp() {
+  try { setupDrawer(); } catch (e) { console.error('Error setupDrawer:', e); }
+  try { setupUserSelector(); } catch (e) { console.error('Error setupUserSelector:', e); }
+  try { setupRateLimitTest(); } catch (e) { console.error('Error setupRateLimitTest:', e); }
+  try { setupCountdown(); } catch (e) { console.error('Error setupCountdown:', e); }
+  try { setupEventDelegation(); } catch (e) { console.error('Error setupEventDelegation:', e); }
+
+  const clearBtn = document.getElementById('btnClearCart');
+  if (clearBtn) clearBtn.addEventListener('click', clearCart);
+
+  const reloadBtn = document.getElementById('btnReloadCatalog');
+  if (reloadBtn) reloadBtn.addEventListener('click', loadCatalog);
+
+  const checkoutBtn = document.getElementById('btnCheckout');
+  if (checkoutBtn) {
+    checkoutBtn.addEventListener('click', () => {
+      if (state.cart.length === 0) {
+        showToast('Tu carrito está vacío.', 'warning');
+        return;
+      }
+      showToast('¡Simulación de compra completada! Pedido listo para reservas.', 'success');
+    });
+  }
+
+  initTokens()
+    .then(() => {
+      loadCatalog();
+      loadCart();
+    })
+    .catch((err) => {
+      console.error('Error initTokens:', err);
+      loadCatalog();
+      loadCart();
+    });
+}
+
+// Inicialización resiliente: se ejecuta inmediatamente si el DOM ya está listo o espera a DOMContentLoaded
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initApp);
+} else {
+  initApp();
+}

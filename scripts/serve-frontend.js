@@ -28,6 +28,7 @@ const MIME_TYPES = {
 const mockProducts = [
   { id: 1, nombre: 'Teclado Mecánico RGB', precio: 120000, desc: 'Switches mecánicos Red, retroiluminación RGB por tecla.' },
   { id: 2, nombre: 'Mouse Gamer Inalámbrico', precio: 60000, desc: 'Sensor óptico 16.000 DPI, latencia ultra-baja 1ms.' },
+  { id: 3, nombre: 'Audífonos Gamer Pro 7.1', precio: 180000, desc: 'Sonido envolvente 7.1 Surround, micrófono con cancelación de ruido.' },
 ];
 
 const mockCart = {
