@@ -7,3 +7,6 @@ data:
   CARRITO_PORT: "3001"
   REDIS_URL: redis://redis:6379
   PRODUCTOS_URL: http://microservicio-productos:3000
+  JWT_ISSUER: shophero-local
+  JWT_AUDIENCE: shophero-api
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318

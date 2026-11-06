@@ -15,14 +15,14 @@ agrodata/
 ├── nfr/                                  # Requerimientos No Funcionales (NFRs)
 │   ├── punto 1 NFRs.docx                 # Documento Word de NFRs (Punto 1)
 │   └── nfr.md                            # 5 Requerimientos No Funcionales (Markdown)
-├── adr/                                  # Architectural Decision Records (5 ADRs)
+├── adr/                                  # Architectural Decision Records (10 ADRs)
 │   ├── punto 3 ADRs.docx                 # Documento Word de ADRs (Punto 3)
 │   ├── 0001-separar-navegacion-y-busqueda-del-checkout-e-inventario.md
 │   ├── 0002-utilizar-redis-con-ttl-para-las-reservas-temporales-de-inventario.md
 │   ├── 0003-utilizar-kafka-y-consistencia-eventual-entre-los-servicios.md
 │   ├── 0004-utilizar-redis-cluster-para-carritos-persistentes.md
 │   └── 0005-utilizar-postgresql-y-patron-transactional-outbox-para-confirmar-pedidos.md
-├── docs/                                 # Documentación de Trade-Offs del Proyecto
+├── docs/                                 # Arquitectura Cloud-Native, OWASP y Trade-Offs
 │   ├── punto 4 Trade-off.docx            # Documento Word de Trade-offs (Punto 4)
 │   └── trade-offs.md                     # Análisis de Trade-Offs (Markdown)
 ├── microservicio-productos/              # Microservicio existente de productos
@@ -56,16 +56,25 @@ agrodata/
 3. **[ADR-003: Utilizar Kafka y Consistencia Eventual entre los Servicios](adr/0003-utilizar-kafka-y-consistencia-eventual-entre-los-servicios.md)**
 4. **[ADR-004: Utilizar Redis Cluster para Carritos Persistentes](adr/0004-utilizar-redis-cluster-para-carritos-persistentes.md)**
 5. **[ADR-005: Utilizar PostgreSQL y Patrón Transactional Outbox para Confirmar Pedidos](adr/0005-utilizar-postgresql-y-patron-transactional-outbox-para-confirmar-pedidos.md)**
+6. **[ADR-006: Utilizar NGINX como API Gateway](adr/0006-utilizar-nginx-como-api-gateway.md)**
+7. **[ADR-007: Validar JWT y scopes en cada servicio](adr/0007-validar-jwt-y-scopes-en-cada-servicio.md)**
+8. **[ADR-008: Utilizar Vault para entregar secretos de desarrollo](adr/0008-utilizar-vault-para-secretos-de-desarrollo.md)**
+9. **[ADR-009: Instrumentar servicios con OpenTelemetry y Prometheus](adr/0009-instrumentar-servicios-con-otel-y-prometheus.md)**
+10. **[ADR-010: Proteger validación de productos con circuit breaker](adr/0010-proteger-validacion-de-productos-con-circuit-breaker.md)**
 
 ---
 
 ## ⚖️ Documentación de Trade-Offs (`docs/`)
 
 - **Punto 4 — Análisis de Trade-Offs**: [`docs/punto 4 Trade-off.docx`](docs/punto%204%20Trade-off.docx) | **[trade-offs.md](docs/trade-offs.md)** (Atributos de Calidad y Matriz de Compromisos de ADRs).
+- **[Arquitectura Cloud-Native](docs/ARQUITECTURA-CLOUD-NATIVE.md)**: flujo de seguridad, observabilidad y resiliencia.
+- **[Análisis crítico](docs/ANALISIS-CRITICO.md)** y **[revisión OWASP API Security](docs/OWASP-API-SECURITY.md)**: trade-offs, riesgos y hallazgos.
 
 ---
 
 ## Fase 1: carrito y Redis con Docker Compose
+
+> **Nota de evolución:** esta sección describe la implementación inicial de Fase 1. El Compose actual aplica la Etapa Cloud-Native: publica únicamente NGINX en el puerto `8080`, exige JWT en las rutas de negocio y obtiene los secretos desde Vault Agent. Para ejecutar el estado vigente, sigue la sección [Etapa Cloud-Native](#etapa-cloud-native-observabilidad-zero-trust-y-resiliencia); los ejemplos directos a `localhost:3000`/`3001` que siguen corresponden al estado histórico anterior al Gateway.
 
 Esta fase incorpora el microservicio de carrito y Redis al entorno Compose. Desde la raíz del repositorio, con Docker Desktop y Docker Compose instalados, ejecuta:
 
@@ -125,3 +134,128 @@ curl http://localhost:3000/api/productos
 ```
 
 Consulta el [README del microservicio](microservicio-productos/README.md) para ejecutarlo sin Docker.
+
+## Etapa Cloud-Native: observabilidad, Zero Trust y resiliencia
+
+Esta etapa publica únicamente el API Gateway en `http://localhost:8080`. Los servicios, Redis, Prometheus, Grafana, OpenTelemetry Collector y Vault quedan en redes internas. Redis permanece como instancia standalone con AOF y los carritos conservan su TTL de 30 días.
+
+### Levantar el entorno y generar un JWT local
+
+En PowerShell, desde la raíz del repositorio:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\bootstrap-dev.ps1
+```
+
+El script inicia Vault dev, genera secretos aleatorios dentro de `.dev-secrets/` (ignorado por Git), crea el token de lectura de Vault Agent y ejecuta `docker compose up --build -d`. Después, se puede levantar/reconstruir el stack con:
+
+```powershell
+docker compose up --build -d
+```
+
+Genera un JWT de 15 minutos para lectura y escritura del carrito:
+
+```powershell
+$token = (node .\scripts\create-dev-token.js usuario_1 cart:read cart:write | Out-String).Trim()
+```
+
+### Probar el flujo autenticado
+
+```powershell
+curl.exe http://localhost:8080/health
+curl.exe -H "Authorization: Bearer $token" http://localhost:8080/api/carritos/usuario_1
+curl.exe -X POST http://localhost:8080/api/carritos/usuario_1/productos `
+  -H "Authorization: Bearer $token" `
+  -H "Content-Type: application/json" `
+  -d "{\"productoId\":\"1\",\"cantidad\":2}"
+curl.exe -H "Authorization: Bearer $token" http://localhost:8080/api/carritos/usuario_1
+```
+
+El POST valida el producto `1` en el servicio de productos antes de persistirlo en Redis. La API directa de los servicios no está publicada. Sin JWT, las rutas de negocio responden `401`; un scope insuficiente o un usuario distinto responde `403`.
+
+### 🌐 Interfaz Web del Cliente (Frontend Base)
+
+Se incluye una interfaz web moderna de tipo Single Page Application (Tailwind CSS, diseño responsivo, banners de Venta Flash, drawer de carrito y panel de arquitectura):
+
+- **Acceso mediante el API Gateway (con Docker Compose levantado)**:
+  Abre tu navegador en [http://localhost:8080/](http://localhost:8080/)
+  - **Catálogo en vivo**: Consulta productos en tiempo real (`/api/productos`).
+  - **Gestión de Sesión Zero-Trust**: Alterna entre identidades (`usuario_1`, `usuario_2`, `admin`) mediante tokens precargados desde `frontend/dev-tokens.json` para verificar la protección BOLA (OWASP API1).
+  - **Persistencia en Redis**: Agrega, modifica o elimina productos de tu carrito persistente (`/api/carritos/:usuarioId`).
+  - **Monitoreo de Resiliencia**: Detecta si el servicio de productos se cae y notifica visualmente la activación del **Modo Degradado** (`degraded: true` vía Circuit Breaker).
+  - **Simulador DoS**: Dispara ráfagas de peticiones concurrentes para comprobar el Rate Limiting (429) en tiempo real.
+  - **Acceso a Grafana**: Enlace directo al dashboard de observabilidad.
+
+- **Previsualización Standalone (sin requerir Docker iniciado)**:
+  Para presentar o inspeccionar la interfaz rápidamente en cualquier entorno:
+  ```powershell
+  node .\scripts\serve-frontend.js
+  ```
+  Abre [http://localhost:5000/](http://localhost:5000/) en tu navegador.
+
+### 🎮 Prototipo Interactivo en Consola
+
+Se incluye una herramienta interactiva para demostrar y verificar en tiempo real todos los componentes del sistema (Zero-Trust, mitigación BOLA, persistencia en Redis, Circuit Breaker Opossum, Rate Limiting y observabilidad):
+
+```powershell
+# Menú interactivo con selección de escenarios paso a paso
+node .\scripts\demo-interactivo.js
+
+# Modo automatizado (tour completo continuo para exposiciones o entregas)
+node .\scripts\demo-interactivo.js --auto
+```
+
+### Métricas, dashboard y pruebas
+
+- Dashboard: [http://localhost:8080/grafana/](http://localhost:8080/grafana/). Grafana tiene rol Viewer anónimo en el entorno local.
+- Prometheus y `/metrics` son internos; para inspeccionar el estado del scraping:
+
+```powershell
+docker compose exec prometheus wget -qO- http://localhost:9090/api/v1/targets
+docker compose logs --tail 50 otel-collector
+```
+
+- Ejecuta las pruebas:
+
+```powershell
+Push-Location .\microservicio-productos
+npm.cmd ci
+npm.cmd test
+Pop-Location
+Push-Location .\microservicio-carrito
+npm.cmd ci
+npm.cmd test
+Pop-Location
+```
+
+- Ejecuta el escenario de rate limit. Requiere k6:
+
+```powershell
+k6 run -e MODE=rate-limit -e TOKEN=$token .\tests\load\triad.js
+```
+
+- Prueba fallback y recuperación del breaker. Primero se llena la caché del carrito; luego se detiene productos mientras k6 comprueba el modo degradado:
+
+```powershell
+k6 run -e MODE=prime -e TOKEN=$token .\tests\load\triad.js
+docker compose stop productos
+k6 run -e MODE=outage -e TOKEN=$token .\tests\load\triad.js
+docker compose start productos
+Start-Sleep -Seconds 6
+k6 run -e MODE=recovery -e TOKEN=$token .\tests\load\triad.js
+```
+
+Terraform se valida sin aprovisionar recursos:
+
+```powershell
+docker run --rm -v "${PWD}\infra:/workspace" -w /workspace hashicorp/terraform:1.9.8 init -backend=false
+docker run --rm -v "${PWD}\infra:/workspace" -w /workspace hashicorp/terraform:1.9.8 validate
+```
+
+Para detener el entorno sin borrar el volumen persistente:
+
+```powershell
+docker compose down
+```
+
+La configuración de Vault en modo dev, JWT local, HTTP y Grafana anónimo es exclusivamente para desarrollo. Las limitaciones respecto a 200.000 usuarios concurrentes, 99,95 % de disponibilidad y Redis standalone se documentan en [docs/ANALISIS-CRITICO.md](docs/ANALISIS-CRITICO.md).

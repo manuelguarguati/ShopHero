@@ -12,7 +12,7 @@ workspace "ShopHero" "E-Commerce de Venta Flash / Black Friday" {
 
             webApp = container "Aplicación Web" "Interfaz utilizada por clientes y administradores." "React / JavaScript"
 
-            apiGateway = container "API Gateway" "Punto de entrada a los servicios internos de ShopHero." "API Gateway"
+            apiGateway = container "API Gateway" "Punto de entrada NGINX con rate limiting a los servicios internos." "NGINX"
 
             catalogService = container "Servicio de Catálogo y Búsqueda" "Gestiona navegación, consulta de productos y búsquedas sin bloquear el proceso transaccional." "Microservicio"
 
@@ -30,11 +30,21 @@ workspace "ShopHero" "E-Commerce de Venta Flash / Black Friday" {
 
             ordersDb = container "Base de Datos de Pedidos" "Almacena los pedidos y transacciones confirmadas." "PostgreSQL"
 
-            redis = container "Redis Cluster" "Almacena carritos persistentes y reservas temporales con TTL." "Redis"
+            redis = container "Redis Cluster" "Almacena carritos persistentes y reservas temporales con TTL; en Compose local se ejecuta standalone." "Redis"
 
             searchIndex = container "Índice de Búsqueda" "Mantiene una vista optimizada del catálogo para navegación y búsquedas rápidas." "OpenSearch / Elasticsearch"
 
             kafka = container "Bus de Eventos" "Distribuye eventos de inventario, reservas, pedidos y actualizaciones entre microservicios." "Apache Kafka"
+
+            prometheus = container "Prometheus" "Recopila métricas HTTP y del proceso de los microservicios." "Prometheus"
+
+            grafana = container "Grafana" "Consulta y visualiza métricas del dashboard base de ShopHero." "Grafana"
+
+            otelCollector = container "OpenTelemetry Collector" "Recibe trazas OTLP y las exporta al backend configurado." "OpenTelemetry Collector"
+
+            vault = container "Vault" "Almacena secretos; el modo dev se limita al entorno local." "HashiCorp Vault"
+
+            vaultAgent = container "Vault Agent" "Autentica en Vault y renderiza secretos en archivos montados para los servicios." "Vault Agent"
         }
 
         cliente -> webApp "Navega, busca productos, administra carrito y compra" "HTTPS"
@@ -43,9 +53,13 @@ workspace "ShopHero" "E-Commerce de Venta Flash / Black Friday" {
 
         webApp -> apiGateway "Realiza solicitudes" "HTTPS/JSON"
 
+        apiGateway -> grafana "Expone el dashboard de observabilidad" "HTTP/JSON"
+
         apiGateway -> catalogService "Consulta productos y búsquedas" "HTTP/JSON"
 
         apiGateway -> cartService "Gestiona el carrito" "HTTP/JSON"
+
+        cartService -> catalogService "Valida el producto antes de persistir el carrito" "HTTP/JSON + JWT de servicio"
 
         apiGateway -> checkoutService "Inicia y consulta el proceso de compra" "HTTP/JSON"
 
@@ -54,6 +68,22 @@ workspace "ShopHero" "E-Commerce de Venta Flash / Black Friday" {
         catalogService -> searchIndex "Realiza búsquedas optimizadas"
 
         cartService -> redis "Guarda y recupera carritos persistentes"
+
+        prometheus -> cartService "Scrapea /metrics" "HTTP"
+
+        prometheus -> catalogService "Scrapea /metrics" "HTTP"
+
+        grafana -> prometheus "Consulta métricas para el dashboard" "PromQL"
+
+        cartService -> otelCollector "Exporta trazas con contexto propagado" "OTLP/HTTP"
+
+        catalogService -> otelCollector "Exporta trazas de HTTP" "OTLP/HTTP"
+
+        vaultAgent -> vault "Lee secretos locales con política de mínimo privilegio" "HTTP"
+
+        vaultAgent -> cartService "Entrega secreto JWT y contraseña Redis en archivos montados" "Volumen interno"
+
+        vaultAgent -> catalogService "Entrega secreto JWT en archivo montado" "Volumen interno"
 
         checkoutService -> reservationService "Solicita una reserva temporal de inventario" "HTTP/JSON"
 

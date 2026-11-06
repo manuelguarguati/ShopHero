@@ -3,10 +3,14 @@ require('./telemetry');
 const { createClient } = require('redis');
 const { createApp } = require('./app');
 const { logger } = require('./observability');
+const fs = require('node:fs');
 
 const PORT = process.env.PORT || 3001;
 const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379';
-const redis = createClient({ url: REDIS_URL });
+const redisPassword = process.env.REDIS_PASSWORD_PATH
+  ? fs.readFileSync(process.env.REDIS_PASSWORD_PATH, 'utf8').trim()
+  : process.env.REDIS_PASSWORD;
+const redis = createClient({ url: REDIS_URL, password: redisPassword });
 
 redis.on('error', (error) => {
   logger.error({ err: error }, 'Error de conexión con Redis');

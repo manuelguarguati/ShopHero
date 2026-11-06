@@ -12,23 +12,47 @@ spec:
       labels:
         app: microservicio-productos
     spec:
+      automountServiceAccountToken: false
       containers:
         - name: productos
           image: ghcr.io/manuelguarguati/shophero/microservicio-productos:latest
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 3000
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
           env:
             - name: PORT
               valueFrom:
                 configMapKeyRef:
                   name: shophero-config
                   key: PRODUCTOS_PORT
-            - name: JWT_PUBLIC_KEY
+            - name: JWT_ISSUER
+              valueFrom:
+                configMapKeyRef:
+                  name: shophero-config
+                  key: JWT_ISSUER
+            - name: JWT_AUDIENCE
+              valueFrom:
+                configMapKeyRef:
+                  name: shophero-config
+                  key: JWT_AUDIENCE
+            - name: OTEL_SERVICE_NAME
+              value: productos
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              valueFrom:
+                configMapKeyRef:
+                  name: shophero-config
+                  key: OTEL_EXPORTER_OTLP_ENDPOINT
+            - name: JWT_SECRET
               valueFrom:
                 secretKeyRef:
                   name: shophero-secrets
-                  key: jwt-public-key
+                  key: jwt-secret
           readinessProbe:
             httpGet:
               path: /health

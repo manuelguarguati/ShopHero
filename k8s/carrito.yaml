@@ -12,12 +12,19 @@ spec:
       labels:
         app: microservicio-carrito
     spec:
+      automountServiceAccountToken: false
       containers:
         - name: carrito
           image: ghcr.io/manuelguarguati/shophero/microservicio-carrito:latest
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 3001
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
           env:
             - name: PORT
               valueFrom:
@@ -34,11 +41,33 @@ spec:
                 configMapKeyRef:
                   name: shophero-config
                   key: PRODUCTOS_URL
-            - name: JWT_PUBLIC_KEY
+            - name: REDIS_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: shophero-secrets
-                  key: jwt-public-key
+                  key: redis-password
+            - name: JWT_ISSUER
+              valueFrom:
+                configMapKeyRef:
+                  name: shophero-config
+                  key: JWT_ISSUER
+            - name: JWT_AUDIENCE
+              valueFrom:
+                configMapKeyRef:
+                  name: shophero-config
+                  key: JWT_AUDIENCE
+            - name: OTEL_SERVICE_NAME
+              value: carrito
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              valueFrom:
+                configMapKeyRef:
+                  name: shophero-config
+                  key: OTEL_EXPORTER_OTLP_ENDPOINT
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: shophero-secrets
+                  key: jwt-secret
           readinessProbe:
             httpGet:
               path: /health

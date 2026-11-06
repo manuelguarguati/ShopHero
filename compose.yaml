@@ -3,27 +3,44 @@ services:
     build:
       context: ./microservicio-productos
       dockerfile: Dockerfile
-    ports:
-      - "3000:3000"
     environment:
       PORT: 3000
       OTEL_SERVICE_NAME: productos
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+      JWT_ISSUER: ${JWT_ISSUER:-shophero-local}
+      JWT_AUDIENCE: ${JWT_AUDIENCE:-shophero-api}
+      JWT_SECRET_PATH: /vault/secrets/jwt-secret
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["while [ ! -s /vault/secrets/jwt-secret ]; do sleep 1; done; exec node src/server.js"]
+    volumes:
+      - vault-secrets:/vault/secrets:ro
+    networks:
+      - shophero-internal
     depends_on:
       otel-collector:
+        condition: service_started
+      vault-agent:
         condition: service_started
     restart: unless-stopped
 
   redis:
     image: redis:7-alpine
-    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec"]
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - while [ ! -s /vault/secrets/redis-password ]; do sleep 1; done; exec redis-server --appendonly yes --appendfsync everysec --requirepass "$$(cat /vault/secrets/redis-password)"
     volumes:
       - redis-data:/data
+      - vault-secrets:/vault/secrets:ro
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "REDISCLI_AUTH=\"$$(cat /vault/secrets/redis-password)\" redis-cli ping | grep -q PONG"]
       interval: 5s
       timeout: 3s
       retries: 10
+    networks:
+      - shophero-internal
+    depends_on:
+      vault-agent:
+        condition: service_started
     restart: unless-stopped
 
   carrito:
@@ -33,14 +50,25 @@ services:
     environment:
       PORT: 3001
       REDIS_URL: redis://redis:6379
+      REDIS_PASSWORD_PATH: /vault/secrets/redis-password
+      PRODUCTOS_URL: http://productos:3000
       OTEL_SERVICE_NAME: carrito
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
-    ports:
-      - "3001:3001"
+      JWT_ISSUER: ${JWT_ISSUER:-shophero-local}
+      JWT_AUDIENCE: ${JWT_AUDIENCE:-shophero-api}
+      JWT_SECRET_PATH: /vault/secrets/jwt-secret
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["while [ ! -s /vault/secrets/jwt-secret ] || [ ! -s /vault/secrets/redis-password ]; do sleep 1; done; exec node src/server.js"]
+    volumes:
+      - vault-secrets:/vault/secrets:ro
+    networks:
+      - shophero-internal
     depends_on:
       redis:
         condition: service_healthy
       otel-collector:
+        condition: service_started
+      vault-agent:
         condition: service_started
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
@@ -53,8 +81,8 @@ services:
     image: prom/prometheus:v3.2.1
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
-    ports:
-      - "9090:9090"
+    networks:
+      - shophero-internal
     depends_on:
       - productos
       - carrito
@@ -66,11 +94,13 @@ services:
       GF_AUTH_ANONYMOUS_ENABLED: "true"
       GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
       GF_AUTH_DISABLE_LOGIN_FORM: "true"
+      GF_SERVER_ROOT_URL: "%(protocol)s://%(domain)s/grafana/"
+      GF_SERVER_SERVE_FROM_SUB_PATH: "true"
     volumes:
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
       - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
-    ports:
-      - "3002:3000"
+    networks:
+      - shophero-internal
     depends_on:
       - prometheus
     restart: unless-stopped
@@ -80,7 +110,78 @@ services:
     command: ["--config=/etc/otelcol-contrib/config.yaml"]
     volumes:
       - ./otel-collector/config.yaml:/etc/otelcol-contrib/config.yaml:ro
+    networks:
+      - shophero-internal
+    restart: unless-stopped
+
+  gateway:
+    image: nginxinc/nginx-unprivileged:1.27-alpine
+    volumes:
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./frontend:/usr/share/nginx/html:ro
+    ports:
+      - "8080:8080"
+    networks:
+      - shophero-internal
+      - gateway-edge
+    depends_on:
+      productos:
+        condition: service_healthy
+      carrito:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  vault:
+    image: hashicorp/vault:1.18.3
+    command: ["vault", "server", "-dev", "-dev-listen-address=0.0.0.0:8200"]
+    environment:
+      VAULT_ADDR: http://127.0.0.1:8200
+    cap_add:
+      - IPC_LOCK
+    volumes:
+      - ./vault/agent-policy.hcl:/vault/config/agent-policy.hcl:ro
+    networks:
+      - shophero-internal
+    healthcheck:
+      test: ["CMD", "vault", "status", "-address=http://127.0.0.1:8200"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  vault-agent:
+    image: hashicorp/vault:1.18.3
+    command:
+      - /bin/sh
+      - -c
+      - chown -R vault:vault /vault/secrets && exec vault agent -config=/vault/config/agent.hcl
+    user: "0:0"
+    environment:
+      VAULT_ADDR: http://vault:8200
+    volumes:
+      - ./vault/agent.hcl:/vault/config/agent.hcl:ro
+      - ./vault/jwt-secret.ctmpl:/vault/config/jwt-secret.ctmpl:ro
+      - ./vault/redis-password.ctmpl:/vault/config/redis-password.ctmpl:ro
+      - ./.dev-secrets/vault-agent-token:/vault/credentials/agent-token:ro
+      - vault-secrets:/vault/secrets
+    networks:
+      - shophero-internal
+    depends_on:
+      vault:
+        condition: service_healthy
     restart: unless-stopped
 
 volumes:
   redis-data:
+  vault-secrets:
+
+networks:
+  shophero-internal:
+    internal: true
+  gateway-edge:
+    driver: bridge

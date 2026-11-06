@@ -24,6 +24,16 @@ const duration = new promClient.Histogram({
 
 const requestLogger = pinoHttp({
   logger,
+  serializers: {
+    req(req) {
+      return {
+        id: req.id,
+        method: req.method,
+        url: req.url,
+        remoteAddress: req.remoteAddress,
+      };
+    },
+  },
   customProps() {
     const span = trace.getSpan(context.active());
     const spanContext = span && span.spanContext();

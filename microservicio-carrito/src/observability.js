@@ -21,9 +21,25 @@ const duration = new promClient.Histogram({
   buckets: [0.01, 0.025, 0.05, 0.1, 0.2, 0.3, 0.5, 1, 2],
   registers: [registry],
 });
+const circuitBreakerState = new promClient.Gauge({
+  name: 'dependency_circuit_breaker_state',
+  help: 'Circuit breaker state: 0 closed, 1 open, 0.5 half-open',
+  labelNames: ['dependency'],
+  registers: [registry],
+});
 
 const requestLogger = pinoHttp({
   logger,
+  serializers: {
+    req(req) {
+      return {
+        id: req.id,
+        method: req.method,
+        url: req.url,
+        remoteAddress: req.remoteAddress,
+      };
+    },
+  },
   customProps() {
     const span = trace.getSpan(context.active());
     const spanContext = span && span.spanContext();
@@ -52,4 +68,12 @@ async function exposeMetrics(_req, res) {
   res.end(await registry.metrics());
 }
 
-module.exports = { exposeMetrics, logger, measureRequests, requestLogger };
+function observeCircuitBreaker(dependency, state) {
+  const value = { closed: 0, open: 1, 'half-open': 0.5 }[state];
+  if (value === undefined) {
+    throw new Error(`Estado de circuit breaker desconocido: ${state}`);
+  }
+  circuitBreakerState.set({ dependency }, value);
+}
+
+module.exports = { exposeMetrics, logger, measureRequests, observeCircuitBreaker, requestLogger };
