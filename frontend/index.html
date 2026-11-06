@@ -94,6 +94,12 @@
         </button>
       </div>
 
+      <!-- ESTADO DEL BACKEND EN TIEMPO REAL -->
+      <div id="backendStatusPill" class="hidden lg:flex items-center gap-2 px-3 py-1.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs font-bold shadow-sm select-none" title="Conexión en vivo con API Gateway NGINX, Redis y Microservicios">
+        <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
+        <span id="backendStatusText">Backend Activo (:8080)</span>
+      </div>
+
       <!-- BOTONES DE ACCIÓN RÁPIDA -->
       <div class="flex items-center gap-2.5">
         <!-- MONITOR DE ARQUITECTURA -->

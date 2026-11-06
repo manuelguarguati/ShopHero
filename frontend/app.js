@@ -81,11 +81,48 @@ function showToast(message, type = 'info') {
   }, 3500);
 }
 
+// Resolver la URL base del API Gateway de forma dinámica e inteligente
+function getApiBaseUrl() {
+  if (typeof window === 'undefined') return 'http://localhost:8080';
+  // Si la página se está ejecutando directamente dentro del contenedor NGINX (puerto 8080)
+  if (window.location.port === '8080') return '';
+  // Si la página se está ejecutando en el servidor de previsualización (puerto 5000)
+  if (window.location.port === '5000') return '';
+  // En cualquier otro caso (file:///, Live Server 5500, etc.), conectar directo al Gateway Docker
+  return 'http://localhost:8080';
+}
+
+// Comprobación activa de salud de la conexión con el Backend
+async function checkBackendConnection() {
+  const pill = document.getElementById('backendStatusPill');
+  const text = document.getElementById('backendStatusText');
+  const baseUrl = getApiBaseUrl();
+
+  try {
+    const signal = typeof AbortSignal !== 'undefined' && AbortSignal.timeout ? AbortSignal.timeout(1800) : undefined;
+    const res = await fetch(`${baseUrl}/health`, { signal });
+    if (res.ok) {
+      if (pill) {
+        pill.className = 'hidden lg:flex items-center gap-2 px-3 py-1.5 rounded-xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 text-xs font-bold shadow-sm select-none';
+      }
+      if (text) text.textContent = 'Backend Conectado (:8080)';
+      return true;
+    }
+  } catch {
+    if (pill) {
+      pill.className = 'hidden lg:flex items-center gap-2 px-3 py-1.5 rounded-xl bg-amber-500/15 border border-amber-500/40 text-amber-300 text-xs font-bold shadow-sm select-none';
+    }
+    if (text) text.textContent = 'Modo Autónomo Local';
+  }
+  return false;
+}
+
 // Carga de Tokens de Desarrollo
 async function initTokens() {
+  const baseUrl = getApiBaseUrl();
   try {
     const signal = typeof AbortSignal !== 'undefined' && AbortSignal.timeout ? AbortSignal.timeout(2000) : undefined;
-    const res = await fetch('/dev-tokens.json', { signal });
+    const res = await fetch(`${baseUrl}/dev-tokens.json`, { signal });
     if (res.ok) {
       const loaded = await res.json();
       state.tokens = { ...FALLBACK_TOKENS, ...loaded };
@@ -111,9 +148,11 @@ async function apiFetch(path, options = {}) {
   };
 
   const signal = typeof AbortSignal !== 'undefined' && AbortSignal.timeout ? AbortSignal.timeout(3500) : undefined;
+  const baseUrl = getApiBaseUrl();
+  const fullUrl = path.startsWith('http') ? path : `${baseUrl}${path}`;
 
   try {
-    const response = await fetch(path, {
+    const response = await fetch(fullUrl, {
       ...options,
       headers,
       signal,
@@ -901,6 +940,10 @@ function initApp() {
   try { setupCentralizedEvents(); } catch (e) { console.error('Error setupCentralizedEvents:', e); }
   try { setupUserSelector(); } catch (e) { console.error('Error setupUserSelector:', e); }
   try { setupCountdown(); } catch (e) { console.error('Error setupCountdown:', e); }
+
+  // Comprobar estado de conexión con el backend
+  checkBackendConnection();
+  setInterval(checkBackendConnection, 10000);
 
   // Carga asíncrona de tokens, catálogo y carritos desde Redis
   initTokens()
