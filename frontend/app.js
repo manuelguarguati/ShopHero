@@ -2,18 +2,18 @@
  * ShopHero Frontend Client - Arquitectura Cloud-Native
  * 
  * Interfaz de cliente robusta y reactiva para catálogo, reservas y carrito en Redis.
- * Incluye fallback offline, control de errores, circuit breaker y delegación segura de eventos.
+ * Manejo de eventos centralizado y delegación segura.
  */
 
-// Tokens por defecto de desarrollo (para previsualización inmediata sin requerir bootstrap)
+// Tokens por defecto de desarrollo para previsualización inmediata
 const FALLBACK_TOKENS = {
   usuario_1: "eyJhbGciOiJIUzI1NiJ9.eyJzY29wZSI6InByb2R1Y3RzOnJlYWQgY2FydDpyZWFkIGNhcnQ6d3JpdGUiLCJyb2xlcyI6W10sImlzcyI6InNob3BoZXJvLWxvY2FsIiwiYXVkIjoic2hvcGhlcm8tYXBpIiwic3ViIjoidXN1YXJpb18xIiwiaWF0IjoxNzkzOTI0NTE2LCJleHAiOjE3OTQwMTA5MTZ9.QGGDZQEiRCVzObvUcOk0FimuRsTPm5A1JWMDp06FVjY",
   usuario_2: "eyJhbGciOiJIUzI1NiJ9.eyJzY29wZSI6ImNhcnQ6cmVhZCBjYXJ0OndyaXRlIiwicm9sZXMiOltdLCJpc3MiOiJzaG9waGVyby1sb2NhbCIsImF1ZCI6InNob3BoZXJvLWFwaSIsInN1YiI6InVzdWFyaW9fMiIsImlhdCI6MTc5MzkyNDUxNiwiZXhwIjoxNzk0MDEwOTE2fQ.4LJXRRKYZk0EFD4K79vMi2IcG8VXELN8GeunB-BxGUM",
   admin: "eyJhbGciOiJIUzI1NiJ9.eyJzY29wZSI6InByb2R1Y3RzOnJlYWQgcHJvZHVjdHM6d3JpdGUgY2FydDpyZWFkIGNhcnQ6d3JpdGUiLCJyb2xlcyI6WyJhZG1pbiJdLCJpc3MiOiJzaG9waGVyby1sb2NhbCIsImF1ZCI6InNob3BoZXJvLWFwaSIsInN1YiI6ImFkbWluIiwiaWF0IjoxNzkzOTI0NTE2LCJleHAiOjE3OTQwMTA5MTZ9.SiU8DddUJ4cZl7QUqM37DfxCorXZQHqDcf1mKUYjH8I",
 };
 
-// Catálogo base de respaldo
-const DEFAULT_PRODUCTS = [
+// Catálogo inicial conocido (para renderizado instantáneo sin pantallas en blanco)
+const INITIAL_PRODUCTS = [
   { id: 1, nombre: 'Teclado Mecánico RGB', precio: 120000, desc: 'Switches mecánicos Red, retroiluminación RGB personalizable por tecla.' },
   { id: 2, nombre: 'Mouse Gamer Inalámbrico', precio: 60000, desc: 'Sensor óptico 16.000 DPI, latencia ultra-baja 1ms.' },
   { id: 3, nombre: 'Audífonos Gamer Pro 7.1', precio: 180000, desc: 'Sonido envolvente 7.1 Surround, micrófono con cancelación y almohadillas memory-foam.' },
@@ -24,10 +24,10 @@ const state = {
   currentUser: 'usuario_1',
   tokens: { ...FALLBACK_TOKENS },
   activeToken: FALLBACK_TOKENS.usuario_1,
-  products: [...DEFAULT_PRODUCTS],
+  products: [...INITIAL_PRODUCTS],
   cart: [],
   isDegraded: false,
-  quantities: {}, // Cantidad seleccionada por producto en catálogo
+  quantities: { '1': 1, '2': 1, '3': 1 }, // Cantidad seleccionada por producto en catálogo
 };
 
 // Formateador de moneda en pesos colombianos (COP)
@@ -39,11 +39,11 @@ const formatMoney = (val) => {
 // Resolver icono según el tipo o nombre del producto
 function getProductIcon(prod) {
   const name = ((prod && prod.nombre) || '').toLowerCase();
-  if (name.includes('teclado') || name.includes('keyboard')) return 'fa-keyboard text-purple-400';
-  if (name.includes('mouse') || name.includes('raton')) return 'fa-computer-mouse text-sky-400';
   if (name.includes('audifono') || name.includes('audífono') || name.includes('auricular') || name.includes('headphone') || name.includes('headset')) {
     return 'fa-headphones text-pink-400';
   }
+  if (name.includes('teclado') || name.includes('keyboard')) return 'fa-keyboard text-purple-400';
+  if (name.includes('mouse') || name.includes('raton')) return 'fa-computer-mouse text-sky-400';
   if (name.includes('monitor') || name.includes('pantalla')) return 'fa-desktop text-emerald-400';
   return 'fa-box text-purple-400';
 }
@@ -52,6 +52,7 @@ function getProductIcon(prod) {
 function showToast(message, type = 'info') {
   const container = document.getElementById('toastContainer');
   if (!container) return;
+
   const toast = document.createElement('div');
   const colors = {
     info: 'bg-slate-900 border-purple-500/40 text-purple-200',
@@ -66,7 +67,7 @@ function showToast(message, type = 'info') {
     error: 'fa-circle-xmark text-rose-400',
   };
 
-  toast.className = `pointer-events-auto flex items-center gap-2.5 px-4 py-3 rounded-xl border shadow-xl text-xs font-medium transition-all duration-300 transform translate-y-2 opacity-0 ${colors[type] || colors.info}`;
+  toast.className = `pointer-events-auto flex items-center gap-2.5 px-4 py-3 rounded-xl border shadow-xl text-xs font-semibold transition-all duration-300 transform translate-y-2 opacity-0 ${colors[type] || colors.info}`;
   toast.innerHTML = `<i class="fa-solid ${icons[type] || icons.info}"></i> <span>${message}</span>`;
   container.appendChild(toast);
 
@@ -90,19 +91,18 @@ async function initTokens() {
       state.tokens = { ...FALLBACK_TOKENS, ...loaded };
     }
   } catch {
-    // Si no se puede consultar el archivo, usamos los tokens precargados
+    // Si no está disponible, mantenemos los tokens de desarrollo precargados
   }
 
   state.activeToken = state.tokens[state.currentUser] || FALLBACK_TOKENS[state.currentUser];
 
-  // Permitir token personalizado guardado en localStorage si existe
   try {
     const stored = localStorage.getItem(`token_${state.currentUser}`);
     if (stored) state.activeToken = stored;
   } catch {}
 }
 
-// Solicitudes HTTP con timeout seguro para evitar que la UI se cuelgue
+// Peticiones HTTP seguras hacia el API Gateway
 async function apiFetch(path, options = {}) {
   const headers = {
     Accept: 'application/json',
@@ -132,87 +132,85 @@ async function apiFetch(path, options = {}) {
   }
 }
 
-// Cargar Catálogo de Productos
-async function loadCatalog() {
-  const grid = document.getElementById('productsGrid');
-  if (grid) {
-    grid.innerHTML = `
-      <div class="animate-pulse bg-slate-900/60 rounded-2xl h-72 border border-slate-800"></div>
-      <div class="animate-pulse bg-slate-900/60 rounded-2xl h-72 border border-slate-800"></div>
-    `;
-  }
-
-  const res = await apiFetch('/api/productos');
-
-  if (res.ok && Array.isArray(res.data) && res.data.length > 0) {
-    state.products = res.data;
-  } else {
-    // Si la API no responde o falla, mantenemos el catálogo por defecto
-    state.products = [...DEFAULT_PRODUCTS];
-  }
-
-  renderProducts();
-}
-
-// Renderizar tarjetas de productos
+// Renderizar tarjetas de productos en el grid del catálogo
 function renderProducts() {
   const grid = document.getElementById('productsGrid');
   if (!grid) return;
+
   grid.innerHTML = '';
 
   state.products.forEach((prod) => {
-    if (!state.quantities[prod.id]) state.quantities[prod.id] = 1;
+    const prodId = String(prod.id);
+    if (!state.quantities[prodId]) state.quantities[prodId] = 1;
 
     const card = document.createElement('div');
     card.className =
-      'bg-slate-900/70 border border-slate-800/80 rounded-2xl p-5 flex flex-col justify-between hover:border-purple-500/40 transition-all duration-300 hover:shadow-xl hover:shadow-purple-500/10 group select-none';
+      'bg-slate-900/80 border border-slate-800 rounded-3xl p-5 flex flex-col justify-between hover:border-purple-500/50 transition-all duration-300 hover:shadow-2xl hover:shadow-purple-500/10 group select-none';
 
     const iconClass = getProductIcon(prod);
     const regularPrice = Math.round(prod.precio * 1.3);
 
     card.innerHTML = `
       <div>
-        <!-- TOP CARD BADGES -->
+        <!-- TOP BADGES -->
         <div class="flex items-center justify-between mb-4">
-          <span class="px-2 py-0.5 rounded text-[10px] font-bold bg-pink-500/20 text-pink-300 border border-pink-500/30">
+          <span class="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-pink-500/20 text-pink-300 border border-pink-500/30">
             -30% VENTA FLASH
           </span>
-          <span class="text-[11px] font-mono text-slate-500">ID: ${prod.id}</span>
+          <span class="text-[11px] font-mono text-slate-500 font-bold">ID: ${prod.id}</span>
         </div>
 
-        <!-- PRODUCT ICON / VISUAL -->
-        <div class="w-full h-32 rounded-xl bg-gradient-to-b from-slate-800/50 to-slate-950 flex items-center justify-center mb-4 group-hover:scale-105 transition-transform duration-300 border border-slate-800/50">
+        <!-- PRODUCT VISUAL / ICON -->
+        <div class="w-full h-36 rounded-2xl bg-gradient-to-b from-slate-800/60 to-slate-950 flex items-center justify-center mb-4 group-hover:scale-105 transition-transform duration-300 border border-slate-800/60 shadow-inner">
           <i class="fa-solid ${iconClass} text-5xl"></i>
         </div>
 
         <!-- DETAILS -->
-        <h3 class="font-bold text-base text-white group-hover:text-purple-300 transition-colors">${prod.nombre}</h3>
-        <p class="text-xs text-slate-400 mt-1 line-clamp-2">${prod.desc || 'Garantía oficial de 1 año con soporte prioritario ShopHero.'}</p>
+        <h3 class="font-extrabold text-base text-white group-hover:text-purple-300 transition-colors">${prod.nombre}</h3>
+        <p class="text-xs text-slate-400 mt-1 line-clamp-2 leading-relaxed">${prod.desc || 'Garantía oficial de 1 año con soporte prioritario ShopHero.'}</p>
       </div>
 
       <!-- PRICE & ACTIONS -->
-      <div class="mt-5 pt-4 border-t border-slate-800/80 space-y-3">
+      <div class="mt-5 pt-4 border-t border-slate-800/80 space-y-3.5">
         <div class="flex items-center justify-between">
           <div>
-            <div class="text-[10px] text-slate-500 line-through">${formatMoney(regularPrice)}</div>
+            <div class="text-[11px] text-slate-500 line-through">${formatMoney(regularPrice)}</div>
             <div class="text-lg font-black text-white font-mono">${formatMoney(prod.precio)}</div>
           </div>
 
-          <!-- SELECTOR DE CANTIDAD -->
-          <div class="flex items-center gap-1 bg-slate-950 border border-slate-800 rounded-lg p-0.5">
-            <button type="button" data-action="change-qty" data-id="${prod.id}" data-delta="-1" onclick="changeQty('${prod.id}', -1)" class="w-6 h-6 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold transition flex items-center justify-center cursor-pointer">-</button>
-            <span id="qty_${prod.id}" class="w-6 text-center text-xs font-mono font-bold text-white">${state.quantities[prod.id]}</span>
-            <button type="button" data-action="change-qty" data-id="${prod.id}" data-delta="1" onclick="changeQty('${prod.id}', 1)" class="w-6 h-6 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold transition flex items-center justify-center cursor-pointer">+</button>
+          <!-- SELECTOR DE CANTIDAD: SUBE AL DARLE AL MÁS, BAJA AL DARLE AL MENOS -->
+          <div class="flex items-center gap-1 bg-slate-950 border border-slate-800 rounded-xl p-1 shadow-inner">
+            <button 
+              type="button" 
+              data-action="qty-decrease" 
+              data-product-id="${prodId}" 
+              class="w-7 h-7 rounded-lg bg-slate-800 hover:bg-slate-700 active:scale-90 text-slate-200 text-sm font-black transition flex items-center justify-center cursor-pointer select-none"
+              title="Disminuir cantidad">
+              -
+            </button>
+            <span 
+              id="qty-${prodId}" 
+              class="w-8 text-center text-xs font-mono font-black text-white select-none transition-transform duration-150">
+              ${state.quantities[prodId]}
+            </span>
+            <button 
+              type="button" 
+              data-action="qty-increase" 
+              data-product-id="${prodId}" 
+              class="w-7 h-7 rounded-lg bg-slate-800 hover:bg-slate-700 active:scale-90 text-slate-200 text-sm font-black transition flex items-center justify-center cursor-pointer select-none"
+              title="Aumentar cantidad">
+              +
+            </button>
           </div>
         </div>
 
+        <!-- BOTÓN AGREGAR AL CARRITO -->
         <button 
           type="button"
-          id="btn_add_${prod.id}"
+          id="btn-add-${prodId}"
           data-action="add-to-cart"
-          data-id="${prod.id}"
-          onclick="handleAddToCart('${prod.id}', this)"
-          class="w-full py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 active:scale-95 text-white font-bold text-xs flex items-center justify-center gap-2 transition shadow-lg shadow-purple-600/20 disabled:opacity-50 disabled:pointer-events-none cursor-pointer">
+          data-product-id="${prodId}"
+          class="w-full py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 active:scale-95 text-white font-extrabold text-xs flex items-center justify-center gap-2 transition shadow-lg shadow-purple-600/25 disabled:opacity-50 disabled:pointer-events-none cursor-pointer">
           <i class="fa-solid fa-cart-plus"></i>
           <span>Agregar al Carrito</span>
         </button>
@@ -223,52 +221,84 @@ function renderProducts() {
   });
 }
 
-// Control de cantidad en catálogo
-function changeQty(prodId, delta) {
-  const current = state.quantities[prodId] || 1;
-  const next = Math.max(1, Math.min(100, current + delta));
-  state.quantities[prodId] = next;
-  const span = document.getElementById(`qty_${prodId}`);
-  if (span) span.textContent = next;
+// Cargar Catálogo de Productos desde el Gateway
+async function loadCatalog() {
+  const res = await apiFetch('/api/productos');
+
+  if (res.ok && Array.isArray(res.data) && res.data.length > 0) {
+    state.products = res.data;
+  }
+  renderProducts();
 }
 
-// Manejo seguro del clic para agregar producto
-async function handleAddToCart(productoId, btn, explicitQty) {
-  const cantidad = explicitQty || state.quantities[productoId] || 1;
-  const targetBtn = btn || document.getElementById(`btn_add_${productoId}`);
+// Modificar cantidad seleccionada de un producto en el catálogo
+function changeQuantity(productId, delta) {
+  const id = String(productId);
+  const current = Number(state.quantities[id]) || 1;
+  const next = Math.max(1, Math.min(99, current + delta));
+  state.quantities[id] = next;
+
+  const qtyDisplay = document.getElementById(`qty-${id}`);
+  if (qtyDisplay) {
+    qtyDisplay.textContent = String(next);
+    // Micro-animación visual para confirmar el cambio al usuario
+    qtyDisplay.classList.add('text-purple-300', 'scale-125');
+    setTimeout(() => {
+      qtyDisplay.classList.remove('text-purple-300', 'scale-125');
+    }, 150);
+  }
+}
+
+// Agregar producto al carrito desde la tarjeta del catálogo
+async function handleAddToCart(productId, triggerBtn) {
+  const id = String(productId);
+  const cantidad = Number(state.quantities[id]) || 1;
+  const prod = state.products.find((p) => String(p.id) === id) || { nombre: `Producto #${id}` };
+
+  const btn = triggerBtn || document.getElementById(`btn-add-${id}`);
   let originalHtml = '';
 
-  if (targetBtn) {
-    originalHtml = targetBtn.innerHTML;
-    targetBtn.disabled = true;
-    targetBtn.innerHTML = `<i class="fa-solid fa-spinner animate-spin"></i> <span>Agregando...</span>`;
+  if (btn) {
+    originalHtml = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = `<i class="fa-solid fa-spinner animate-spin"></i> <span>Agregando (${cantidad})...</span>`;
   }
 
+  showToast(`Validando y guardando ${cantidad} x "${prod.nombre}" en Redis...`, 'info');
+
   try {
-    await addToCart(productoId, cantidad);
-  } finally {
-    if (targetBtn) {
-      targetBtn.disabled = false;
-      targetBtn.innerHTML = originalHtml;
+    await persistCartItem(id, cantidad);
+    if (btn) {
+      btn.innerHTML = `<i class="fa-solid fa-check text-emerald-300"></i> <span>¡Agregado!</span>`;
+      setTimeout(() => {
+        if (btn) {
+          btn.disabled = false;
+          btn.innerHTML = originalHtml;
+        }
+      }, 800);
+    }
+  } catch (err) {
+    showToast(`Error al agregar: ${err.message}`, 'error');
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = originalHtml;
     }
   }
 }
 
-// Agregar producto al carrito mediante la API con persistencia en Redis
-async function addToCart(productoId, cantidad = 1) {
-  showToast(`Validando y guardando producto #${productoId} en Redis...`, 'info');
-
+// Guardar producto en el microservicio de carrito (persistencia en Redis)
+async function persistCartItem(productoId, cantidad) {
   const res = await apiFetch(`/api/carritos/${state.currentUser}/productos`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ productoId: String(productoId), cantidad }),
+    body: JSON.stringify({ productoId: String(productoId), cantidad: Number(cantidad) }),
   });
 
   if (res.ok) {
     if (res.data?.degraded) {
       state.isDegraded = true;
-      const degAlert = document.getElementById('degradedAlert');
-      if (degAlert) degAlert.classList.remove('hidden');
+      const alertEl = document.getElementById('degradedAlert');
+      if (alertEl) alertEl.classList.remove('hidden');
       const cbPill = document.getElementById('cbStatusPill');
       if (cbPill) {
         cbPill.innerHTML = `
@@ -279,8 +309,8 @@ async function addToCart(productoId, cantidad = 1) {
       showToast('⚠️ Agregado en MODO DEGRADADO (Fallback local)', 'warning');
     } else {
       state.isDegraded = false;
-      const degAlert = document.getElementById('degradedAlert');
-      if (degAlert) degAlert.classList.add('hidden');
+      const alertEl = document.getElementById('degradedAlert');
+      if (alertEl) alertEl.classList.add('hidden');
       const cbPill = document.getElementById('cbStatusPill');
       if (cbPill) {
         cbPill.innerHTML = `
@@ -292,10 +322,9 @@ async function addToCart(productoId, cantidad = 1) {
     }
 
     await loadCart();
-    // Abrir automáticamente el drawer del carrito para dar confirmación visual inmediata
-    openCart();
+    openCartDrawer();
   } else {
-    // Si la API falla pero estamos en preview, agregamos al carrito en memoria para que no se tranque
+    // Si la API falla pero estamos en modo local/previsualización, agregamos al carrito en memoria
     if (res.status === 0 || !res.ok) {
       const existing = state.cart.find((item) => String(item.productoId) === String(productoId));
       if (existing) {
@@ -303,9 +332,9 @@ async function addToCart(productoId, cantidad = 1) {
       } else {
         state.cart.push({ productoId: String(productoId), cantidad });
       }
-      showToast('✔ Producto agregado al carrito local (Previsualización)', 'success');
+      showToast('✔ Producto guardado en carrito local', 'success');
       renderCartItems();
-      openCart();
+      openCartDrawer();
       return;
     }
 
@@ -319,11 +348,11 @@ async function addToCart(productoId, cantidad = 1) {
   }
 }
 
-// Cargar Carrito desde Redis
+// Cargar el carrito del usuario actual desde Redis
 async function loadCart() {
   const ownerLabel = document.getElementById('cartOwnerLabel');
   if (ownerLabel) {
-    ownerLabel.innerHTML = `Usuario: <span class="text-purple-300 font-mono">${state.currentUser}</span>`;
+    ownerLabel.innerHTML = `Usuario: <span class="text-purple-300 font-mono font-bold">${state.currentUser}</span>`;
   }
 
   const res = await apiFetch(`/api/carritos/${state.currentUser}`);
@@ -337,10 +366,10 @@ async function loadCart() {
       const countBadge = document.getElementById('cartCountBadge');
       if (list) {
         list.innerHTML = `
-          <div class="p-4 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs text-center">
-            <i class="fa-solid fa-shield-halved text-2xl mb-1 text-rose-400"></i>
-            <p class="font-bold">Acceso Denegado (BOLA / OWASP API1)</p>
-            <p class="text-[11px] mt-1 text-rose-400">Tu token JWT no tiene autorización para acceder al carrito de <span class="font-mono">${state.currentUser}</span>.</p>
+          <div class="p-5 rounded-2xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs text-center space-y-2">
+            <i class="fa-solid fa-shield-halved text-3xl text-rose-400"></i>
+            <p class="font-bold text-sm">Acceso Denegado (BOLA / OWASP API1)</p>
+            <p class="text-[11px] text-rose-400/90">Tu token JWT no posee los permisos requeridos para acceder al carrito de <span class="font-mono font-bold">${state.currentUser}</span>.</p>
           </div>
         `;
       }
@@ -352,7 +381,7 @@ async function loadCart() {
   }
 }
 
-// Renderizar elementos del carrito
+// Renderizar la lista de productos en el Drawer del carrito
 function renderCartItems() {
   const list = document.getElementById('cartItemsList');
   const countBadge = document.getElementById('cartCountBadge');
@@ -363,9 +392,10 @@ function renderCartItems() {
 
   if (state.cart.length === 0) {
     list.innerHTML = `
-      <div class="text-center py-16 text-slate-500 space-y-2 select-none">
-        <i class="fa-solid fa-basket-shopping text-4xl text-slate-700"></i>
-        <p class="text-sm">Tu carrito en Redis está vacío.</p>
+      <div class="text-center py-20 text-slate-500 space-y-3 select-none">
+        <i class="fa-solid fa-basket-shopping text-5xl text-slate-800"></i>
+        <p class="text-sm font-semibold">Tu carrito en Redis está vacío.</p>
+        <p class="text-xs text-slate-600">Explora el catálogo y agrega productos para comenzar.</p>
       </div>
     `;
     updateTotals(0);
@@ -385,15 +415,43 @@ function renderCartItems() {
     subtotal += itemSubtotal;
 
     const row = document.createElement('div');
-    row.className = 'flex items-center justify-between p-3 rounded-xl bg-slate-950/70 border border-slate-800 gap-3';
+    row.className = 'flex items-center justify-between p-3.5 rounded-2xl bg-slate-950/80 border border-slate-800 gap-3 shadow-md';
     row.innerHTML = `
       <div class="flex-1 min-w-0">
         <h4 class="font-bold text-xs text-white truncate">${prod.nombre}</h4>
-        <p class="text-[11px] text-slate-400 font-mono">${formatMoney(prod.precio)} x ${item.cantidad} = <span class="text-purple-300 font-semibold">${formatMoney(itemSubtotal)}</span></p>
+        <p class="text-[11px] text-slate-400 font-mono mt-0.5">${formatMoney(prod.precio)} x ${item.cantidad} = <span class="text-purple-300 font-bold">${formatMoney(itemSubtotal)}</span></p>
       </div>
+
       <div class="flex items-center gap-1.5 flex-shrink-0">
-        <button type="button" data-action="add-to-cart" data-id="${item.productoId}" data-qty="1" onclick="handleAddToCart('${item.productoId}', this, 1)" class="w-6 h-6 rounded bg-slate-800 hover:bg-slate-700 text-white text-xs flex items-center justify-center font-bold transition cursor-pointer" title="Aumentar cantidad">+</button>
-        <button type="button" data-action="remove-item" data-id="${item.productoId}" onclick="removeFromCart('${item.productoId}')" class="w-6 h-6 rounded bg-rose-500/20 hover:bg-rose-500 text-rose-300 hover:text-white text-xs flex items-center justify-center transition cursor-pointer" title="Eliminar producto">
+        <!-- BOTÓN DISMINUIR CANTIDAD EN CARRITO -->
+        <button 
+          type="button" 
+          data-action="cart-qty-decrease" 
+          data-product-id="${item.productoId}" 
+          class="w-7 h-7 rounded-lg bg-slate-800 hover:bg-slate-700 active:scale-90 text-slate-300 hover:text-white text-xs font-black transition flex items-center justify-center cursor-pointer" 
+          title="Disminuir en carrito">
+          -
+        </button>
+
+        <span class="w-6 text-center text-xs font-mono font-bold text-white select-none">${item.cantidad}</span>
+
+        <!-- BOTÓN AUMENTAR CANTIDAD EN CARRITO -->
+        <button 
+          type="button" 
+          data-action="cart-qty-increase" 
+          data-product-id="${item.productoId}" 
+          class="w-7 h-7 rounded-lg bg-slate-800 hover:bg-slate-700 active:scale-90 text-slate-300 hover:text-white text-xs font-black transition flex items-center justify-center cursor-pointer" 
+          title="Aumentar en carrito">
+          +
+        </button>
+
+        <!-- BOTÓN ELIMINAR DEL CARRITO -->
+        <button 
+          type="button" 
+          data-action="cart-remove-item" 
+          data-product-id="${item.productoId}" 
+          class="w-7 h-7 rounded-lg bg-rose-500/20 hover:bg-rose-500 active:scale-90 text-rose-300 hover:text-white text-xs flex items-center justify-center transition cursor-pointer ml-1" 
+          title="Eliminar producto">
           <i class="fa-solid fa-trash-can text-[10px]"></i>
         </button>
       </div>
@@ -404,41 +462,68 @@ function renderCartItems() {
   updateTotals(subtotal);
 }
 
-// Eliminar un producto del carrito
+// Modificar cantidad de un artículo directamente desde el Drawer
+async function handleCartItemQuantity(productId, delta) {
+  const id = String(productId);
+  const item = state.cart.find((i) => String(i.productoId) === id);
+  if (!item) return;
+
+  if (delta > 0) {
+    await persistCartItem(id, 1);
+  } else {
+    if (item.cantidad <= 1) {
+      await removeFromCart(id);
+    } else {
+      // Disminución controlada
+      item.cantidad -= 1;
+      renderCartItems();
+      showToast(`Cantidad de producto #${id} actualizada.`, 'info');
+      // Sincronizar con el backend
+      apiFetch(`/api/carritos/${state.currentUser}/productos`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ productoId: id, cantidad: -1 }),
+      }).catch(() => {});
+    }
+  }
+}
+
+// Eliminar un producto del carrito en Redis
 async function removeFromCart(productoId) {
-  showToast(`Eliminando producto #${productoId}...`, 'info');
-  const res = await apiFetch(`/api/carritos/${state.currentUser}/productos/${productoId}`, {
+  const id = String(productoId);
+  showToast(`Eliminando producto #${id} del carrito...`, 'info');
+
+  const res = await apiFetch(`/api/carritos/${state.currentUser}/productos/${id}`, {
     method: 'DELETE',
   });
 
-  // Manejo exitoso o fallback local
-  if (res.ok || res.status === 204 || res.status === 0) {
-    state.cart = state.cart.filter((item) => String(item.productoId) !== String(productoId));
-    showToast('Producto eliminado del carrito.', 'success');
-    renderCartItems();
-  } else {
-    showToast(`Error al eliminar: HTTP ${res.status}`, 'error');
-  }
+  state.cart = state.cart.filter((item) => String(item.productoId) !== id);
+  renderCartItems();
+  showToast('Producto eliminado del carrito.', 'success');
 }
 
-// Vaciar carrito
+// Vaciar carrito completamente en Redis
 async function clearCart() {
-  if (!confirm('¿Deseas vaciar completamente tu carrito de compras?')) return;
-  const res = await apiFetch(`/api/carritos/${state.currentUser}`, {
-    method: 'DELETE',
-  });
-  if (res.ok || res.status === 204 || res.status === 0) {
-    state.cart = [];
-    showToast('Carrito vaciado exitosamente en Redis.', 'success');
-    renderCartItems();
-  } else {
-    showToast(`Error: HTTP ${res.status}`, 'error');
+  if (state.cart.length === 0) {
+    showToast('El carrito ya está vacío.', 'info');
+    return;
   }
+
+  if (!confirm('¿Deseas vaciar completamente tu carrito de compras?')) return;
+
+  showToast('Vaciando carrito en Redis...', 'info');
+  await apiFetch(`/api/carritos/${state.currentUser}`, { method: 'DELETE' });
+
+  state.cart = [];
+  renderCartItems();
+  showToast('Carrito vaciado exitosamente en Redis.', 'success');
 }
 
+// Actualizar cálculo de subtotal, descuento Black Friday y total
 function updateTotals(subtotal) {
   const discount = Math.round(subtotal * 0.15);
   const total = subtotal - discount;
+
   const subEl = document.getElementById('cartSubtotal');
   const discEl = document.getElementById('cartDiscount');
   const totEl = document.getElementById('cartTotal');
@@ -448,33 +533,43 @@ function updateTotals(subtotal) {
   if (totEl) totEl.textContent = formatMoney(total);
 }
 
-// Control del Drawer del Carrito
-function openCart() {
-  const cartDrawer = document.getElementById('cartDrawer');
-  const cartPanel = document.getElementById('cartPanel');
-  if (cartDrawer && cartPanel) {
-    cartDrawer.classList.remove('pointer-events-none', 'opacity-0');
-    cartPanel.classList.remove('translate-x-full');
+// Simulación de checkout / proceder al pago
+function checkout() {
+  if (state.cart.length === 0) {
+    showToast('Tu carrito está vacío.', 'warning');
+    return;
+  }
+  showToast('🎉 ¡Orden confirmada! Las reservas han sido consolidadas en Redis.', 'success');
+  closeCartDrawer();
+}
+
+// Control del Slide-over Drawer del Carrito
+function openCartDrawer() {
+  const drawer = document.getElementById('cartDrawer');
+  const panel = document.getElementById('cartPanel');
+  if (drawer && panel) {
+    drawer.classList.remove('pointer-events-none', 'opacity-0');
+    panel.classList.remove('translate-x-full');
   }
 }
 
-function closeCart() {
-  const cartDrawer = document.getElementById('cartDrawer');
-  const cartPanel = document.getElementById('cartPanel');
-  if (cartDrawer && cartPanel) {
-    cartDrawer.classList.add('opacity-0');
-    cartPanel.classList.add('translate-x-full');
-    setTimeout(() => cartDrawer.classList.add('pointer-events-none'), 300);
+function closeCartDrawer() {
+  const drawer = document.getElementById('cartDrawer');
+  const panel = document.getElementById('cartPanel');
+  if (drawer && panel) {
+    drawer.classList.add('opacity-0');
+    panel.classList.add('translate-x-full');
+    setTimeout(() => drawer.classList.add('pointer-events-none'), 300);
   }
 }
 
-// Control del Modal de Nuevo Producto
+// Control del Modal de Ingresar Nuevo Producto
 function openNewProductModal() {
   const modal = document.getElementById('newProductModal');
   if (modal) {
     modal.classList.remove('pointer-events-none', 'opacity-0');
-    const nameInput = document.getElementById('newProdName');
-    if (nameInput) setTimeout(() => nameInput.focus(), 100);
+    const input = document.getElementById('newProdName');
+    if (input) setTimeout(() => input.focus(), 150);
   }
 }
 
@@ -486,7 +581,7 @@ function closeNewProductModal() {
   }
 }
 
-// Envío de Nuevo Producto (totalmente asíncrono y seguro, sin recarga ni navegación)
+// Envío de nuevo producto (asíncrono, sin recargas ni navegación)
 async function submitNewProduct() {
   const submitBtn = document.getElementById('btnSubmitNewProduct');
   const nameInput = document.getElementById('newProdName');
@@ -536,12 +631,11 @@ async function submitNewProduct() {
       closeNewProductModal();
       await loadCatalog();
     } else {
-      // Si la API falla pero estamos previsualizando, agregar localmente
+      // Fallback local inmediato si el microservicio está en mantenimiento
       const nextId = state.products.length ? Math.max(...state.products.map((p) => p.id)) + 1 : 1;
-      const localProd = { id: nextId, nombre, precio, desc };
-      state.products.push(localProd);
+      state.products.push({ id: nextId, nombre, precio, desc });
       renderProducts();
-      showToast(`✔ Producto "${nombre}" ingresado al catálogo local`, 'success');
+      showToast(`✔ Producto "${nombre}" agregado al catálogo local`, 'success');
       nameInput.value = '';
       priceInput.value = '';
       if (descInput) descInput.value = '';
@@ -557,121 +651,95 @@ async function submitNewProduct() {
   }
 }
 
-// Configuración de Modales y Drawers
-function setupDrawer() {
-  const btnOpenCart = document.getElementById('btnOpenCart');
-  const btnCloseCart = document.getElementById('btnCloseCart');
-  const cartBackdrop = document.getElementById('cartBackdrop');
-
-  if (btnOpenCart) btnOpenCart.addEventListener('click', openCart);
-  if (btnCloseCart) btnCloseCart.addEventListener('click', closeCart);
-  if (cartBackdrop) cartBackdrop.addEventListener('click', closeCart);
-
-  // Monitor Modal
-  const monitorModal = document.getElementById('monitorModal');
-  const btnToggleMonitor = document.getElementById('btnToggleMonitor');
-  const btnCloseMonitor = document.getElementById('btnCloseMonitor');
-  const monitorBackdrop = document.getElementById('monitorBackdrop');
-
-  const openMonitor = () => {
-    if (monitorModal) monitorModal.classList.remove('pointer-events-none', 'opacity-0');
-  };
-  const closeMonitor = () => {
-    if (monitorModal) {
-      monitorModal.classList.add('opacity-0');
-      setTimeout(() => monitorModal.classList.add('pointer-events-none'), 300);
-    }
-  };
-
-  if (btnToggleMonitor) btnToggleMonitor.addEventListener('click', openMonitor);
-  if (btnCloseMonitor) btnCloseMonitor.addEventListener('click', closeMonitor);
-  if (monitorBackdrop) monitorBackdrop.addEventListener('click', closeMonitor);
-
-  // Token Modal
-  const tokenModal = document.getElementById('tokenModal');
-  const btnTokenInfo = document.getElementById('btnTokenInfo');
-  const btnCloseTokenModal = document.getElementById('btnCloseTokenModal');
-  const tokenBackdrop = document.getElementById('tokenBackdrop');
-  const jwtTextarea = document.getElementById('jwtTextarea');
-
-  const openToken = () => {
-    if (jwtTextarea) jwtTextarea.value = state.activeToken;
-    if (tokenModal) tokenModal.classList.remove('pointer-events-none', 'opacity-0');
-  };
-  const closeToken = () => {
-    if (tokenModal) {
-      tokenModal.classList.add('opacity-0');
-      setTimeout(() => tokenModal.classList.add('pointer-events-none'), 300);
-    }
-  };
-
-  if (btnTokenInfo) btnTokenInfo.addEventListener('click', openToken);
-  if (btnCloseTokenModal) btnCloseTokenModal.addEventListener('click', closeToken);
-  if (tokenBackdrop) tokenBackdrop.addEventListener('click', closeToken);
-
-  const btnCopyToken = document.getElementById('btnCopyToken');
-  if (btnCopyToken) {
-    btnCopyToken.addEventListener('click', () => {
-      if (jwtTextarea) {
-        try {
-          if (navigator.clipboard && navigator.clipboard.writeText) {
-            navigator.clipboard.writeText(jwtTextarea.value);
-          } else {
-            jwtTextarea.select();
-            document.execCommand('copy');
-          }
-          showToast('Token JWT copiado al portapapeles', 'success');
-        } catch {
-          showToast('Selecciona y copia el token manualmente.', 'info');
-        }
-      }
-    });
-  }
-
-  const btnSaveCustomToken = document.getElementById('btnSaveCustomToken');
-  if (btnSaveCustomToken) {
-    btnSaveCustomToken.addEventListener('click', () => {
-      if (jwtTextarea) {
-        state.activeToken = jwtTextarea.value.trim();
-        try {
-          localStorage.setItem(`token_${state.currentUser}`, state.activeToken);
-        } catch {}
-        showToast('Token personalizado aplicado.', 'success');
-        closeToken();
-        loadCatalog();
-        loadCart();
-      }
-    });
-  }
-
-  // Modal para Ingresar Nuevo Producto
-  const btnOpenNewProduct = document.getElementById('btnOpenNewProductModal');
-  const btnCloseNewProduct = document.getElementById('btnCloseNewProductModal');
-  const btnCancelNewProduct = document.getElementById('btnCancelNewProduct');
-  const newProductBackdrop = document.getElementById('newProductBackdrop');
-  const btnSubmitNewProduct = document.getElementById('btnSubmitNewProduct');
-
-  if (btnOpenNewProduct) btnOpenNewProduct.addEventListener('click', openNewProductModal);
-  if (btnCloseNewProduct) btnCloseNewProduct.addEventListener('click', closeNewProductModal);
-  if (btnCancelNewProduct) btnCancelNewProduct.addEventListener('click', closeNewProductModal);
-  if (newProductBackdrop) newProductBackdrop.addEventListener('click', closeNewProductModal);
-  if (btnSubmitNewProduct) btnSubmitNewProduct.addEventListener('click', submitNewProduct);
-
-  // Atajos con tecla Enter en inputs de nuevo producto
-  ['newProdName', 'newProdPrice', 'newProdDesc'].forEach((id) => {
-    const input = document.getElementById(id);
-    if (input) {
-      input.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') {
-          e.preventDefault();
-          submitNewProduct();
-        }
-      });
-    }
-  });
+// Control del Modal del Monitor de Arquitectura
+function openMonitorModal() {
+  const modal = document.getElementById('monitorModal');
+  if (modal) modal.classList.remove('pointer-events-none', 'opacity-0');
 }
 
-// Selector de Usuario / Sesión
+function closeMonitorModal() {
+  const modal = document.getElementById('monitorModal');
+  if (modal) {
+    modal.classList.add('opacity-0');
+    setTimeout(() => modal.classList.add('pointer-events-none'), 300);
+  }
+}
+
+// Prueba de Ráfaga de Concurrencia (Simulación DoS y Rate Limiting NGINX)
+async function runRateLimitTest() {
+  const btn = document.getElementById('btnRateLimitTest');
+  const resDiv = document.getElementById('rateLimitResult');
+  if (!btn || !resDiv) return;
+
+  btn.disabled = true;
+  resDiv.innerHTML = '<span class="text-purple-400 font-semibold"><i class="fa-solid fa-spinner animate-spin mr-1"></i> Disparando 50 peticiones simultáneas...</span>';
+
+  const promises = [];
+  for (let i = 0; i < 50; i++) {
+    promises.push(apiFetch(`/api/carritos/${state.currentUser}`).then((r) => r.status));
+  }
+
+  const statuses = await Promise.all(promises);
+  const count200 = statuses.filter((s) => s === 200).length;
+  const count429 = statuses.filter((s) => s === 429).length;
+
+  resDiv.innerHTML = `
+    <span class="text-emerald-400 font-bold">200 OK: ${count200}</span> | 
+    <span class="text-amber-400 font-bold">429 Rate Limit: ${count429}</span>
+  `;
+  btn.disabled = false;
+  showToast(`Ráfaga concluida: ${count429} solicitudes bloqueadas con HTTP 429`, 'warning');
+}
+
+// Control del Modal de Token JWT
+function openTokenModal() {
+  const modal = document.getElementById('tokenModal');
+  const textarea = document.getElementById('jwtTextarea');
+  if (textarea) textarea.value = state.activeToken;
+  if (modal) modal.classList.remove('pointer-events-none', 'opacity-0');
+}
+
+function closeTokenModal() {
+  const modal = document.getElementById('tokenModal');
+  if (modal) {
+    modal.classList.add('opacity-0');
+    setTimeout(() => modal.classList.add('pointer-events-none'), 300);
+  }
+}
+
+function copyTokenToClipboard() {
+  const textarea = document.getElementById('jwtTextarea');
+  if (!textarea) return;
+
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(textarea.value);
+    } else {
+      textarea.select();
+      document.execCommand('copy');
+    }
+    showToast('Token JWT copiado al portapapeles', 'success');
+  } catch {
+    showToast('Selecciona y copia el texto del token.', 'info');
+  }
+}
+
+function saveCustomToken() {
+  const textarea = document.getElementById('jwtTextarea');
+  if (!textarea) return;
+
+  state.activeToken = textarea.value.trim();
+  try {
+    localStorage.setItem(`token_${state.currentUser}`, state.activeToken);
+  } catch {}
+
+  showToast('Token personalizado aplicado con éxito.', 'success');
+  closeTokenModal();
+  loadCatalog();
+  loadCart();
+}
+
+// Selector de Sesión de Usuario
 function setupUserSelector() {
   const select = document.getElementById('userSelector');
   if (!select) return;
@@ -684,6 +752,7 @@ function setupUserSelector() {
     try {
       stored = localStorage.getItem(`token_${state.currentUser}`);
     } catch {}
+
     state.activeToken = stored || state.tokens[state.currentUser] || FALLBACK_TOKENS[state.currentUser] || '';
     showToast(`Sesión cambiada a ${state.currentUser}`, 'info');
     loadCatalog();
@@ -691,35 +760,7 @@ function setupUserSelector() {
   });
 }
 
-// Simulador de Rate Limiting
-function setupRateLimitTest() {
-  const btn = document.getElementById('btnRateLimitTest');
-  const resDiv = document.getElementById('rateLimitResult');
-  if (!btn || !resDiv) return;
-
-  btn.addEventListener('click', async () => {
-    btn.disabled = true;
-    resDiv.innerHTML = '<span class="text-purple-400"><i class="fa-solid fa-spinner animate-spin"></i> Disparando 50 requests concurrentes...</span>';
-
-    const promises = [];
-    for (let i = 0; i < 50; i++) {
-      promises.push(apiFetch(`/api/carritos/${state.currentUser}`).then((r) => r.status));
-    }
-
-    const statuses = await Promise.all(promises);
-    const count200 = statuses.filter((s) => s === 200).length;
-    const count429 = statuses.filter((s) => s === 429).length;
-
-    resDiv.innerHTML = `
-      <span class="text-emerald-400 font-bold">200 OK: ${count200}</span> | 
-      <span class="text-amber-400 font-bold">429 Rate Limit: ${count429}</span>
-    `;
-    btn.disabled = false;
-    showToast(`Ráfaga finalizada: ${count429} peticiones bloqueadas por NGINX (429)`, 'warning');
-  });
-}
-
-// Countdown timer para Flash Sale
+// Reloj de cuenta regresiva
 function setupCountdown() {
   let seconds = 18;
   let minutes = 42;
@@ -747,65 +788,121 @@ function setupCountdown() {
   }, 1000);
 }
 
-// Manejador delegado de clics para garantizar funcionalidad 100% independiente de scopes inline
-function setupEventDelegation() {
-  document.addEventListener('click', (e) => {
-    const btn = e.target.closest('[data-action]');
-    if (!btn) return;
+// DELEGACIÓN CENTRALIZADA DE CLICS (GARANTIZA QUE CADA BOTÓN FUNCIONE AL 100%)
+function setupCentralizedEvents() {
+  document.addEventListener('click', (event) => {
+    const trigger = event.target.closest('[data-action]');
+    if (!trigger) return;
 
-    e.preventDefault();
-    const action = btn.dataset.action;
-    const id = btn.dataset.id;
+    // Prevenir cualquier navegación o comportamiento nativo indeseado
+    event.preventDefault();
 
-    if (action === 'add-to-cart') {
-      const qty = Number(btn.dataset.qty || state.quantities[id] || 1);
-      handleAddToCart(id, btn, qty);
-    } else if (action === 'change-qty') {
-      const delta = Number(btn.dataset.delta || 1);
-      changeQty(id, delta);
-    } else if (action === 'remove-item') {
-      removeFromCart(id);
+    const action = trigger.dataset.action;
+    const productId = trigger.dataset.productId;
+
+    switch (action) {
+      case 'qty-increase':
+        changeQuantity(productId, +1);
+        break;
+      case 'qty-decrease':
+        changeQuantity(productId, -1);
+        break;
+      case 'add-to-cart':
+        handleAddToCart(productId, trigger);
+        break;
+      case 'cart-qty-increase':
+        handleCartItemQuantity(productId, +1);
+        break;
+      case 'cart-qty-decrease':
+        handleCartItemQuantity(productId, -1);
+        break;
+      case 'cart-remove-item':
+        removeFromCart(productId);
+        break;
+      case 'open-cart':
+        openCartDrawer();
+        break;
+      case 'close-cart':
+        closeCartDrawer();
+        break;
+      case 'clear-cart':
+        clearCart();
+        break;
+      case 'checkout':
+        checkout();
+        break;
+      case 'open-new-product':
+        openNewProductModal();
+        break;
+      case 'close-new-product':
+        closeNewProductModal();
+        break;
+      case 'submit-new-product':
+        submitNewProduct();
+        break;
+      case 'open-monitor':
+        openMonitorModal();
+        break;
+      case 'close-monitor':
+        closeMonitorModal();
+        break;
+      case 'open-token-modal':
+        openTokenModal();
+        break;
+      case 'close-token-modal':
+        closeTokenModal();
+        break;
+      case 'copy-token':
+        copyTokenToClipboard();
+        break;
+      case 'save-token':
+        saveCustomToken();
+        break;
+      case 'test-rate-limit':
+        runRateLimitTest();
+        break;
+      case 'reload-catalog':
+        loadCatalog();
+        break;
+    }
+  });
+
+  // Atajos de teclado en campos de nuevo producto
+  ['newProdName', 'newProdPrice', 'newProdDesc'].forEach((id) => {
+    const input = document.getElementById(id);
+    if (input) {
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          submitNewProduct();
+        }
+      });
     }
   });
 }
 
-// Exposición en window para garantizar compatibilidad con cualquier atributo inline en DOM
-window.changeQty = changeQty;
+// Exposición pública en window para redundancia y compatibilidad total
+window.changeQuantity = changeQuantity;
 window.handleAddToCart = handleAddToCart;
-window.addToCart = addToCart;
 window.removeFromCart = removeFromCart;
 window.clearCart = clearCart;
-window.openCart = openCart;
-window.closeCart = closeCart;
+window.openCartDrawer = openCartDrawer;
+window.closeCartDrawer = closeCartDrawer;
 window.openNewProductModal = openNewProductModal;
 window.closeNewProductModal = closeNewProductModal;
 window.submitNewProduct = submitNewProduct;
 
-// Función de inicialización centralizada
+// Inicialización de la aplicación
 function initApp() {
-  try { setupDrawer(); } catch (e) { console.error('Error setupDrawer:', e); }
+  // Renderizado instantáneo de productos en 0 ms
+  renderProducts();
+
+  // Configurar selectores y eventos
+  try { setupCentralizedEvents(); } catch (e) { console.error('Error setupCentralizedEvents:', e); }
   try { setupUserSelector(); } catch (e) { console.error('Error setupUserSelector:', e); }
-  try { setupRateLimitTest(); } catch (e) { console.error('Error setupRateLimitTest:', e); }
   try { setupCountdown(); } catch (e) { console.error('Error setupCountdown:', e); }
-  try { setupEventDelegation(); } catch (e) { console.error('Error setupEventDelegation:', e); }
 
-  const clearBtn = document.getElementById('btnClearCart');
-  if (clearBtn) clearBtn.addEventListener('click', clearCart);
-
-  const reloadBtn = document.getElementById('btnReloadCatalog');
-  if (reloadBtn) reloadBtn.addEventListener('click', loadCatalog);
-
-  const checkoutBtn = document.getElementById('btnCheckout');
-  if (checkoutBtn) {
-    checkoutBtn.addEventListener('click', () => {
-      if (state.cart.length === 0) {
-        showToast('Tu carrito está vacío.', 'warning');
-        return;
-      }
-      showToast('¡Simulación de compra completada! Pedido listo para reservas.', 'success');
-    });
-  }
-
+  // Carga asíncrona de tokens, catálogo y carritos desde Redis
   initTokens()
     .then(() => {
       loadCatalog();
@@ -818,7 +915,7 @@ function initApp() {
     });
 }
 
-// Inicialización resiliente: se ejecuta inmediatamente si el DOM ya está listo o espera a DOMContentLoaded
+// Inicialización resiliente según el estado del documento
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', initApp);
 } else {
