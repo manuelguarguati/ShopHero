@@ -1,966 +1,1142 @@
 /**
- * ShopHero Frontend Client - Arquitectura Cloud-Native
- * 
- * Interfaz de cliente robusta y reactiva para catálogo, reservas y carrito en Redis.
- * Manejo de eventos centralizado y delegación segura.
+ * ShopHero — cliente web (SPA sin dependencias).
+ *
+ * Consume el API Gateway NGINX:
+ *   GET    /health
+ *   GET    /api/productos                         (scope products:read)
+ *   POST   /api/productos                         (scope products:write)
+ *   GET    /api/carritos/:usuarioId               (scope cart:read + dueño del carrito)
+ *   POST   /api/carritos/:usuarioId/productos     (scope cart:write; suma cantidad 1..1000)
+ *   DELETE /api/carritos/:usuarioId/productos/:id (scope cart:write)
+ *   DELETE /api/carritos/:usuarioId               (scope cart:write)
+ *
+ * Principio: la interfaz nunca finge un éxito. Si el backend responde 401/403/429/503,
+ * se muestra el motivo real para que los controles Zero-Trust sean visibles.
  */
+(() => {
+  'use strict';
 
-// Tokens por defecto de desarrollo para previsualización inmediata
-const FALLBACK_TOKENS = {
-  usuario_1: "eyJhbGciOiJIUzI1NiJ9.eyJzY29wZSI6InByb2R1Y3RzOnJlYWQgY2FydDpyZWFkIGNhcnQ6d3JpdGUiLCJyb2xlcyI6W10sImlzcyI6InNob3BoZXJvLWxvY2FsIiwiYXVkIjoic2hvcGhlcm8tYXBpIiwic3ViIjoidXN1YXJpb18xIiwiaWF0IjoxNzkzOTI0NTE2LCJleHAiOjE3OTQwMTA5MTZ9.QGGDZQEiRCVzObvUcOk0FimuRsTPm5A1JWMDp06FVjY",
-  usuario_2: "eyJhbGciOiJIUzI1NiJ9.eyJzY29wZSI6ImNhcnQ6cmVhZCBjYXJ0OndyaXRlIiwicm9sZXMiOltdLCJpc3MiOiJzaG9waGVyby1sb2NhbCIsImF1ZCI6InNob3BoZXJvLWFwaSIsInN1YiI6InVzdWFyaW9fMiIsImlhdCI6MTc5MzkyNDUxNiwiZXhwIjoxNzk0MDEwOTE2fQ.4LJXRRKYZk0EFD4K79vMi2IcG8VXELN8GeunB-BxGUM",
-  admin: "eyJhbGciOiJIUzI1NiJ9.eyJzY29wZSI6InByb2R1Y3RzOnJlYWQgcHJvZHVjdHM6d3JpdGUgY2FydDpyZWFkIGNhcnQ6d3JpdGUiLCJyb2xlcyI6WyJhZG1pbiJdLCJpc3MiOiJzaG9waGVyby1sb2NhbCIsImF1ZCI6InNob3BoZXJvLWFwaSIsInN1YiI6ImFkbWluIiwiaWF0IjoxNzkzOTI0NTE2LCJleHAiOjE3OTQwMTA5MTZ9.SiU8DddUJ4cZl7QUqM37DfxCorXZQHqDcf1mKUYjH8I",
-};
+  // ---------------------------------------------------------------------------
+  // Configuración y estado
+  // ---------------------------------------------------------------------------
+  const USERS = ['usuario_1', 'usuario_2', 'admin'];
+  const FLASH_DISCOUNT = 0.3; // el precio del API es el precio de oferta (30 % de descuento)
+  const REQUEST_TIMEOUT_MS = 4000;
+  const HEALTH_INTERVAL_MS = 10000;
 
-// Catálogo inicial conocido (para renderizado instantáneo sin pantallas en blanco)
-const INITIAL_PRODUCTS = [
-  { id: 1, nombre: 'Teclado Mecánico RGB', precio: 120000, desc: 'Switches mecánicos Red, retroiluminación RGB personalizable por tecla.' },
-  { id: 2, nombre: 'Mouse Gamer Inalámbrico', precio: 60000, desc: 'Sensor óptico 16.000 DPI, latencia ultra-baja 1ms.' },
-  { id: 3, nombre: 'Audífonos Gamer Pro 7.1', precio: 180000, desc: 'Sonido envolvente 7.1 Surround, micrófono con cancelación y almohadillas memory-foam.' },
-];
+  const state = {
+    currentUser: 'usuario_1',
+    tokens: {},          // tokens de dev-tokens.json
+    activeToken: '',
+    tokenIsCustom: false,
+    backend: 'checking', // checking | online | demo | offline
+    products: [],
+    catalog: { status: 'loading', error: null },
+    cart: [],
+    cartStatus: { status: 'loading', error: null },
+    quantities: {},      // cantidad elegida en cada tarjeta del catálogo
+    pending: new Set(),  // operaciones en curso (evita doble clic)
+    degraded: false,
+    search: '',
+    sort: 'relevance',
+    category: '',        // filtro de categoría ('' = todas)
+  };
 
-// Estado global de la aplicación
-const state = {
-  currentUser: 'usuario_1',
-  tokens: { ...FALLBACK_TOKENS },
-  activeToken: FALLBACK_TOKENS.usuario_1,
-  products: [...INITIAL_PRODUCTS],
-  cart: [],
-  isDegraded: false,
-  quantities: { '1': 1, '2': 1, '3': 1 }, // Cantidad seleccionada por producto en catálogo
-};
+  const $ = (id) => document.getElementById(id);
 
-// Formateador de moneda en pesos colombianos (COP)
-const formatMoney = (val) => {
-  const num = Number(val) || 0;
-  return new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(num);
-};
+  // ---------------------------------------------------------------------------
+  // Utilidades
+  // ---------------------------------------------------------------------------
+  const moneyFmt = new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 });
+  const formatMoney = (value) => moneyFmt.format(Number(value) || 0);
 
-// Resolver icono según el tipo o nombre del producto
-function getProductIcon(prod) {
-  const name = ((prod && prod.nombre) || '').toLowerCase();
-  if (name.includes('audifono') || name.includes('audífono') || name.includes('auricular') || name.includes('headphone') || name.includes('headset')) {
-    return 'fa-headphones text-pink-400';
+  /** Escapa texto antes de insertarlo como HTML (evita XSS con nombres de producto). */
+  function escapeHtml(value) {
+    return String(value ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   }
-  if (name.includes('teclado') || name.includes('keyboard')) return 'fa-keyboard text-purple-400';
-  if (name.includes('mouse') || name.includes('raton')) return 'fa-computer-mouse text-sky-400';
-  if (name.includes('monitor') || name.includes('pantalla')) return 'fa-desktop text-emerald-400';
-  return 'fa-box text-purple-400';
-}
 
-// Sistema de Notificaciones Toast
-function showToast(message, type = 'info') {
-  const container = document.getElementById('toastContainer');
-  if (!container) return;
+  function regularPrice(price) {
+    return Math.round(price / (1 - FLASH_DISCOUNT) / 1000) * 1000;
+  }
 
-  const toast = document.createElement('div');
-  const colors = {
-    info: 'bg-slate-900 border-purple-500/40 text-purple-200',
-    success: 'bg-slate-900 border-emerald-500/40 text-emerald-200',
-    warning: 'bg-slate-900 border-amber-500/40 text-amber-200',
-    error: 'bg-slate-900 border-rose-500/40 text-rose-200',
-  };
-  const icons = {
-    info: 'fa-info-circle text-purple-400',
-    success: 'fa-circle-check text-emerald-400',
-    warning: 'fa-triangle-exclamation text-amber-400',
-    error: 'fa-circle-xmark text-rose-400',
+  function normalize(text) {
+    return String(text || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+  }
+
+  const storage = {
+    get(key) { try { return localStorage.getItem(key); } catch { return null; } },
+    set(key, value) { try { localStorage.setItem(key, value); } catch { /* almacenamiento no disponible */ } },
+    remove(key) { try { localStorage.removeItem(key); } catch { /* almacenamiento no disponible */ } },
   };
 
-  toast.className = `pointer-events-auto flex items-center gap-2.5 px-4 py-3 rounded-xl border shadow-xl text-xs font-semibold transition-all duration-300 transform translate-y-2 opacity-0 ${colors[type] || colors.info}`;
-  toast.innerHTML = `<i class="fa-solid ${icons[type] || icons.info}"></i> <span>${message}</span>`;
-  container.appendChild(toast);
+  // ---------------------------------------------------------------------------
+  // JWT (solo lectura de claims para la interfaz; la verificación la hace el backend)
+  // ---------------------------------------------------------------------------
+  function decodeJwt(token) {
+    try {
+      const part = token.split('.')[1];
+      const json = atob(part.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(part.length / 4) * 4, '='));
+      return JSON.parse(decodeURIComponent(escape(json)));
+    } catch {
+      return null;
+    }
+  }
 
-  requestAnimationFrame(() => {
-    toast.classList.remove('translate-y-2', 'opacity-0');
-  });
+  function tokenInfo(token = state.activeToken) {
+    const payload = token ? decodeJwt(token) : null;
+    if (!payload) return { valid: false, present: Boolean(token) };
+    const scopes = typeof payload.scope === 'string' ? payload.scope.split(/\s+/).filter(Boolean) : [];
+    const roles = Array.isArray(payload.roles) ? payload.roles : [];
+    const exp = typeof payload.exp === 'number' ? new Date(payload.exp * 1000) : null;
+    return { valid: true, present: true, sub: payload.sub, scopes, roles, exp, expired: exp ? exp.getTime() <= Date.now() : false };
+  }
 
-  setTimeout(() => {
-    toast.classList.add('opacity-0', 'translate-y-2');
-    setTimeout(() => toast.remove(), 300);
-  }, 3500);
-}
+  function can(scope) {
+    const info = tokenInfo();
+    return info.valid && (info.roles.includes('admin') || info.scopes.includes(scope));
+  }
 
-// Resolver la URL base del API Gateway de forma dinámica e inteligente
-function getApiBaseUrl() {
-  if (typeof window === 'undefined') return 'http://localhost:8080';
-  // Si la página se está ejecutando directamente dentro del contenedor NGINX (puerto 8080)
-  if (window.location.port === '8080') return '';
-  // Si la página se está ejecutando en el servidor de previsualización (puerto 5000)
-  if (window.location.port === '5000') return '';
-  // En cualquier otro caso (file:///, Live Server 5500, etc.), conectar directo al Gateway Docker
-  return 'http://localhost:8080';
-}
+  function relativeTime(date) {
+    const diffMin = Math.round((date.getTime() - Date.now()) / 60000);
+    const rtf = new Intl.RelativeTimeFormat('es', { numeric: 'auto' });
+    if (Math.abs(diffMin) < 60) return rtf.format(diffMin, 'minute');
+    const diffH = Math.round(diffMin / 60);
+    if (Math.abs(diffH) < 48) return rtf.format(diffH, 'hour');
+    return rtf.format(Math.round(diffH / 24), 'day');
+  }
 
-// Comprobación activa de salud de la conexión con el Backend
-async function checkBackendConnection() {
-  const pill = document.getElementById('backendStatusPill');
-  const text = document.getElementById('backendStatusText');
-  const baseUrl = getApiBaseUrl();
+  // ---------------------------------------------------------------------------
+  // HTTP
+  // ---------------------------------------------------------------------------
+  function apiBaseUrl() {
+    const { protocol, port } = window.location;
+    // Servido por NGINX (:8080) o por scripts/serve-frontend.js (:5000): mismo origen.
+    if (protocol.startsWith('http') && (port === '8080' || port === '5000')) return '';
+    // Abierto como archivo o desde otro servidor: hablar directo con el Gateway.
+    return 'http://localhost:8080';
+  }
 
-  try {
-    const signal = typeof AbortSignal !== 'undefined' && AbortSignal.timeout ? AbortSignal.timeout(1800) : undefined;
-    const res = await fetch(`${baseUrl}/health`, { signal });
-    if (res.ok) {
-      if (pill) {
-        pill.className = 'hidden lg:flex items-center gap-2 px-3 py-1.5 rounded-xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 text-xs font-bold shadow-sm select-none';
+  async function apiFetch(path, { method = 'GET', body, token = state.activeToken, timeout = REQUEST_TIMEOUT_MS } = {}) {
+    const headers = { Accept: 'application/json' };
+    if (token) headers.Authorization = `Bearer ${token}`;
+    if (body !== undefined) headers['Content-Type'] = 'application/json';
+
+    try {
+      const response = await fetch(`${apiBaseUrl()}${path}`, {
+        method,
+        headers,
+        body: body !== undefined ? JSON.stringify(body) : undefined,
+        signal: AbortSignal.timeout ? AbortSignal.timeout(timeout) : undefined,
+      });
+      const type = response.headers.get('content-type') || '';
+      let data = null;
+      if (response.status !== 204) {
+        data = type.includes('application/json') ? await response.json().catch(() => null) : await response.text();
       }
-      if (text) text.textContent = 'Backend Conectado (:8080)';
-      return true;
+      const mock = response.headers.get('x-shophero-mock') === '1';
+      if (mock) setBackend('demo');
+      return { ok: response.ok, status: response.status, data, mock };
+    } catch (err) {
+      return { ok: false, status: 0, data: null, error: err.name === 'TimeoutError' ? 'timeout' : err.message };
     }
-  } catch {
-    if (pill) {
-      pill.className = 'hidden lg:flex items-center gap-2 px-3 py-1.5 rounded-xl bg-amber-500/15 border border-amber-500/40 text-amber-300 text-xs font-bold shadow-sm select-none';
-    }
-    if (text) text.textContent = 'Modo Autónomo Local';
-  }
-  return false;
-}
-
-// Carga de Tokens de Desarrollo
-async function initTokens() {
-  const baseUrl = getApiBaseUrl();
-  try {
-    const signal = typeof AbortSignal !== 'undefined' && AbortSignal.timeout ? AbortSignal.timeout(2000) : undefined;
-    const res = await fetch(`${baseUrl}/dev-tokens.json`, { signal });
-    if (res.ok) {
-      const loaded = await res.json();
-      state.tokens = { ...FALLBACK_TOKENS, ...loaded };
-    }
-  } catch {
-    // Si no está disponible, mantenemos los tokens de desarrollo precargados
   }
 
-  state.activeToken = state.tokens[state.currentUser] || FALLBACK_TOKENS[state.currentUser];
+  /** Traduce una respuesta fallida a un mensaje entendible. */
+  function describeError(res, context = '') {
+    const serverMsg = res.data && typeof res.data === 'object' && res.data.error ? res.data.error : '';
+    switch (res.status) {
+      case 0: return res.error === 'timeout'
+        ? 'El API Gateway no respondió a tiempo.'
+        : 'No hay conexión con el API Gateway (localhost:8080). ¿Está levantado Docker Compose?';
+      case 400: return serverMsg || 'Solicitud inválida.';
+      case 401: return 'Token ausente, inválido o vencido. Regenera los tokens de desarrollo.';
+      case 403: return serverMsg
+        ? `Acceso denegado: ${serverMsg}.`
+        : `Acceso denegado: tu token no tiene permiso${context ? ` para ${context}` : ''}.`;
+      case 404: return serverMsg || 'Recurso no encontrado.';
+      case 429: return 'Demasiadas solicitudes: el API Gateway aplicó rate limiting (HTTP 429).';
+      case 503: return serverMsg || 'Servicio no disponible temporalmente.';
+      default: return serverMsg || `Error inesperado (HTTP ${res.status}).`;
+    }
+  }
 
-  try {
-    const stored = localStorage.getItem(`token_${state.currentUser}`);
-    if (stored) state.activeToken = stored;
-  } catch {}
-}
-
-// Peticiones HTTP seguras hacia el API Gateway
-async function apiFetch(path, options = {}) {
-  const headers = {
-    Accept: 'application/json',
-    ...(state.activeToken ? { Authorization: `Bearer ${state.activeToken}` } : {}),
-    ...options.headers,
+  // ---------------------------------------------------------------------------
+  // Notificaciones
+  // ---------------------------------------------------------------------------
+  const TOAST_STYLE = {
+    info: ['border-purple-500/40 text-purple-100', 'fa-circle-info text-purple-300'],
+    success: ['border-emerald-500/40 text-emerald-100', 'fa-circle-check text-emerald-400'],
+    warning: ['border-amber-500/40 text-amber-100', 'fa-triangle-exclamation text-amber-400'],
+    error: ['border-rose-500/40 text-rose-100', 'fa-circle-xmark text-rose-400'],
   };
 
-  const signal = typeof AbortSignal !== 'undefined' && AbortSignal.timeout ? AbortSignal.timeout(3500) : undefined;
-  const baseUrl = getApiBaseUrl();
-  const fullUrl = path.startsWith('http') ? path : `${baseUrl}${path}`;
-
-  try {
-    const response = await fetch(fullUrl, {
-      ...options,
-      headers,
-      signal,
-    });
-
-    let data;
-    const contentType = response.headers.get('content-type') || '';
-    if (contentType.includes('application/json')) {
-      data = await response.json();
-    } else {
-      data = await response.text();
-    }
-    return { ok: response.ok, status: response.status, data };
-  } catch (err) {
-    return { ok: false, status: 0, error: err.name === 'TimeoutError' ? 'Tiempo de espera agotado' : err.message };
-  }
-}
-
-// Renderizar tarjetas de productos en el grid del catálogo
-function renderProducts() {
-  const grid = document.getElementById('productsGrid');
-  if (!grid) return;
-
-  grid.innerHTML = '';
-
-  state.products.forEach((prod) => {
-    const prodId = String(prod.id);
-    if (!state.quantities[prodId]) state.quantities[prodId] = 1;
-
-    const card = document.createElement('div');
-    card.className =
-      'bg-slate-900/80 border border-slate-800 rounded-3xl p-5 flex flex-col justify-between hover:border-purple-500/50 transition-all duration-300 hover:shadow-2xl hover:shadow-purple-500/10 group select-none';
-
-    const iconClass = getProductIcon(prod);
-    const regularPrice = Math.round(prod.precio * 1.3);
-
-    card.innerHTML = `
-      <div>
-        <!-- TOP BADGES -->
-        <div class="flex items-center justify-between mb-4">
-          <span class="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-pink-500/20 text-pink-300 border border-pink-500/30">
-            -30% VENTA FLASH
-          </span>
-          <span class="text-[11px] font-mono text-slate-500 font-bold">ID: ${prod.id}</span>
-        </div>
-
-        <!-- PRODUCT VISUAL / ICON -->
-        <div class="w-full h-36 rounded-2xl bg-gradient-to-b from-slate-800/60 to-slate-950 flex items-center justify-center mb-4 group-hover:scale-105 transition-transform duration-300 border border-slate-800/60 shadow-inner">
-          <i class="fa-solid ${iconClass} text-5xl"></i>
-        </div>
-
-        <!-- DETAILS -->
-        <h3 class="font-extrabold text-base text-white group-hover:text-purple-300 transition-colors">${prod.nombre}</h3>
-        <p class="text-xs text-slate-400 mt-1 line-clamp-2 leading-relaxed">${prod.desc || 'Garantía oficial de 1 año con soporte prioritario ShopHero.'}</p>
-      </div>
-
-      <!-- PRICE & ACTIONS -->
-      <div class="mt-5 pt-4 border-t border-slate-800/80 space-y-3.5">
-        <div class="flex items-center justify-between">
-          <div>
-            <div class="text-[11px] text-slate-500 line-through">${formatMoney(regularPrice)}</div>
-            <div class="text-lg font-black text-white font-mono">${formatMoney(prod.precio)}</div>
-          </div>
-
-          <!-- SELECTOR DE CANTIDAD: SUBE AL DARLE AL MÁS, BAJA AL DARLE AL MENOS -->
-          <div class="flex items-center gap-1 bg-slate-950 border border-slate-800 rounded-xl p-1 shadow-inner">
-            <button 
-              type="button" 
-              data-action="qty-decrease" 
-              data-product-id="${prodId}" 
-              class="w-7 h-7 rounded-lg bg-slate-800 hover:bg-slate-700 active:scale-90 text-slate-200 text-sm font-black transition flex items-center justify-center cursor-pointer select-none"
-              title="Disminuir cantidad">
-              -
-            </button>
-            <span 
-              id="qty-${prodId}" 
-              class="w-8 text-center text-xs font-mono font-black text-white select-none transition-transform duration-150">
-              ${state.quantities[prodId]}
-            </span>
-            <button 
-              type="button" 
-              data-action="qty-increase" 
-              data-product-id="${prodId}" 
-              class="w-7 h-7 rounded-lg bg-slate-800 hover:bg-slate-700 active:scale-90 text-slate-200 text-sm font-black transition flex items-center justify-center cursor-pointer select-none"
-              title="Aumentar cantidad">
-              +
-            </button>
-          </div>
-        </div>
-
-        <!-- BOTÓN AGREGAR AL CARRITO -->
-        <button 
-          type="button"
-          id="btn-add-${prodId}"
-          data-action="add-to-cart"
-          data-product-id="${prodId}"
-          class="w-full py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 active:scale-95 text-white font-extrabold text-xs flex items-center justify-center gap-2 transition shadow-lg shadow-purple-600/25 disabled:opacity-50 disabled:pointer-events-none cursor-pointer">
-          <i class="fa-solid fa-cart-plus"></i>
-          <span>Agregar al Carrito</span>
-        </button>
-      </div>
-    `;
-
-    grid.appendChild(card);
-  });
-}
-
-// Cargar Catálogo de Productos desde el Gateway
-async function loadCatalog() {
-  const res = await apiFetch('/api/productos');
-
-  if (res.ok && Array.isArray(res.data) && res.data.length > 0) {
-    state.products = res.data;
-  }
-  renderProducts();
-}
-
-// Modificar cantidad seleccionada de un producto en el catálogo
-function changeQuantity(productId, delta) {
-  const id = String(productId);
-  const current = Number(state.quantities[id]) || 1;
-  const next = Math.max(1, Math.min(99, current + delta));
-  state.quantities[id] = next;
-
-  const qtyDisplay = document.getElementById(`qty-${id}`);
-  if (qtyDisplay) {
-    qtyDisplay.textContent = String(next);
-    // Micro-animación visual para confirmar el cambio al usuario
-    qtyDisplay.classList.add('text-purple-300', 'scale-125');
+  function showToast(message, type = 'info', duration = 4000) {
+    const container = $('toastContainer');
+    const [colors, icon] = TOAST_STYLE[type] || TOAST_STYLE.info;
+    const toast = document.createElement('div');
+    toast.className = `toast ${colors}`;
+    toast.setAttribute('role', type === 'error' ? 'alert' : 'status');
+    toast.innerHTML = `<i class="fa-solid ${icon} mt-0.5" aria-hidden="true"></i><span class="leading-relaxed">${escapeHtml(message)}</span>`;
+    container.appendChild(toast);
+    requestAnimationFrame(() => requestAnimationFrame(() => toast.setAttribute('data-show', '')));
     setTimeout(() => {
-      qtyDisplay.classList.remove('text-purple-300', 'scale-125');
-    }, 150);
-  }
-}
-
-// Agregar producto al carrito desde la tarjeta del catálogo
-async function handleAddToCart(productId, triggerBtn) {
-  const id = String(productId);
-  const cantidad = Number(state.quantities[id]) || 1;
-  const prod = state.products.find((p) => String(p.id) === id) || { nombre: `Producto #${id}` };
-
-  const btn = triggerBtn || document.getElementById(`btn-add-${id}`);
-  let originalHtml = '';
-
-  if (btn) {
-    originalHtml = btn.innerHTML;
-    btn.disabled = true;
-    btn.innerHTML = `<i class="fa-solid fa-spinner animate-spin"></i> <span>Agregando (${cantidad})...</span>`;
+      toast.removeAttribute('data-show');
+      setTimeout(() => toast.remove(), 300);
+    }, duration);
   }
 
-  showToast(`Validando y guardando ${cantidad} x "${prod.nombre}" en Redis...`, 'info');
+  // ---------------------------------------------------------------------------
+  // Overlays (drawer y modales) con foco y Escape
+  // ---------------------------------------------------------------------------
+  let lastFocused = null;
 
-  try {
-    await persistCartItem(id, cantidad);
-    if (btn) {
-      btn.innerHTML = `<i class="fa-solid fa-check text-emerald-300"></i> <span>¡Agregado!</span>`;
-      setTimeout(() => {
-        if (btn) {
-          btn.disabled = false;
-          btn.innerHTML = originalHtml;
-        }
-      }, 800);
+  function openOverlay(id) {
+    const el = $(id);
+    if (!el || !el.hidden) return;
+    lastFocused = document.activeElement;
+    el.hidden = false;
+    document.body.style.overflow = 'hidden';
+    requestAnimationFrame(() => requestAnimationFrame(() => el.setAttribute('data-open', '')));
+    const focusTarget = el.querySelector('[autofocus], input, textarea, select, button:not([data-action="close-overlay"])') || el.querySelector('button');
+    setTimeout(() => focusTarget && focusTarget.focus(), 60);
+  }
+
+  function closeOverlay(id) {
+    const el = id ? $(id) : topOverlay();
+    if (!el || el.hidden) return;
+    el.removeAttribute('data-open');
+    setTimeout(() => {
+      el.hidden = true;
+      if (!topOverlay()) document.body.style.overflow = '';
+    }, 250);
+    if (el.id === 'confirmModal' && confirmResolver) resolveConfirm(false);
+    if (lastFocused && typeof lastFocused.focus === 'function') lastFocused.focus();
+  }
+
+  function topOverlay() {
+    const open = [...document.querySelectorAll('[data-overlay]')].filter((el) => !el.hidden);
+    return open[open.length - 1] || null;
+  }
+
+  let confirmResolver = null;
+  function resolveConfirm(value) {
+    const resolve = confirmResolver;
+    confirmResolver = null;
+    if (resolve) resolve(value);
+  }
+
+  function confirmDialog({ title, text, okLabel = 'Confirmar' }) {
+    $('confirmTitle').textContent = title;
+    $('confirmText').textContent = text;
+    $('confirmOk').textContent = okLabel;
+    openOverlay('confirmModal');
+    return new Promise((resolve) => { confirmResolver = resolve; });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Estado del backend y avisos
+  // ---------------------------------------------------------------------------
+  function setBackend(status) {
+    if (state.backend === status) return;
+    state.backend = status;
+    renderBackendStatus();
+    renderNotices();
+    renderAdminControls();
+    if (state.catalog.status === 'ok') renderProducts();
+  }
+
+  function renderBackendStatus() {
+    const pill = $('backendStatusPill');
+    const labels = {
+      checking: 'Conectando…',
+      online: 'Backend conectado',
+      demo: 'Modo demo (datos simulados)',
+      offline: 'Gateway sin conexión',
+    };
+    pill.className = `status-pill status-pill--${state.backend} hidden lg:flex`;
+    $('backendStatusText').textContent = labels[state.backend];
+
+    const gw = $('gwStatus');
+    const redis = $('redisStatus');
+    const set = (el, color, text) => { el.innerHTML = `<span class="w-2 h-2 rounded-full ${color}"></span><span>${text}</span>`; };
+    if (state.backend === 'online') {
+      set(gw, 'bg-emerald-500', 'Conectado');
+      set(redis, 'bg-emerald-500', 'Operativo (/health OK)');
+    } else if (state.backend === 'demo') {
+      set(gw, 'bg-sky-400', 'Simulado (preview)');
+      set(redis, 'bg-sky-400', 'Simulado en memoria');
+    } else if (state.backend === 'offline') {
+      set(gw, 'bg-rose-500', 'Sin conexión');
+      set(redis, 'bg-rose-500', 'Desconocido');
     }
-  } catch (err) {
-    showToast(`Error al agregar: ${err.message}`, 'error');
-    if (btn) {
-      btn.disabled = false;
-      btn.innerHTML = originalHtml;
+    renderCircuitBreaker();
+  }
+
+  function renderCircuitBreaker() {
+    const cb = $('cbStatus');
+    cb.innerHTML = state.degraded
+      ? '<span class="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span><span class="text-amber-300">Abierto · usando caché</span>'
+      : '<span class="w-2 h-2 rounded-full bg-emerald-500"></span><span class="text-emerald-300">Cerrado (normal)</span>';
+  }
+
+  async function checkBackend() {
+    const res = await apiFetch('/health', { token: null, timeout: 2500 });
+    if (res.status === 0) setBackend('offline');
+    else setBackend(res.mock ? 'demo' : 'online');
+    if (res.status === 503) {
+      $('redisStatus').innerHTML = '<span class="w-2 h-2 rounded-full bg-rose-500"></span><span class="text-rose-300">Redis no disponible (503)</span>';
     }
   }
-}
 
-// Guardar producto en el microservicio de carrito (persistencia en Redis)
-async function persistCartItem(productoId, cantidad) {
-  const res = await apiFetch(`/api/carritos/${state.currentUser}/productos`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ productoId: String(productoId), cantidad: Number(cantidad) }),
-  });
+  function renderNotices() {
+    const area = $('noticeArea');
+    const notices = [];
+    const info = tokenInfo();
 
-  if (res.ok) {
-    if (res.data?.degraded) {
-      state.isDegraded = true;
-      const alertEl = document.getElementById('degradedAlert');
-      if (alertEl) alertEl.classList.remove('hidden');
-      const cbPill = document.getElementById('cbStatusPill');
-      if (cbPill) {
-        cbPill.innerHTML = `
-          <span class="w-2 h-2 rounded-full bg-amber-500 animate-ping"></span>
-          <span class="text-amber-400">Degradado (Caché local activa)</span>
-        `;
-      }
-      showToast('⚠️ Agregado en MODO DEGRADADO (Fallback local)', 'warning');
+    if (state.backend === 'offline') {
+      notices.push({
+        type: 'error', icon: 'fa-plug-circle-xmark',
+        title: 'No hay conexión con el API Gateway',
+        body: 'Levanta el entorno con <code class="code">docker compose up -d</code> y abre <code class="code">http://localhost:8080</code>, o usa la vista previa con <code class="code">node scripts/serve-frontend.js</code>.',
+      });
+    } else if (state.backend === 'demo') {
+      notices.push({
+        type: 'info', icon: 'fa-circle-info',
+        title: 'Modo demo',
+        body: 'El Gateway no está disponible, así que la vista previa responde con datos simulados en memoria. Los permisos (scopes y dueño del carrito) se simulan, pero la firma y la expiración del token no se verifican.',
+      });
+    }
+
+    if (!info.present) {
+      notices.push({
+        type: 'warning', icon: 'fa-key',
+        title: `No hay token para ${escapeHtml(state.currentUser)}`,
+        body: 'Genera los tokens de desarrollo con <code class="code">node scripts/generate-frontend-tokens.js</code> (requiere haber ejecutado <code class="code">bootstrap-dev.ps1</code>) y recarga la página.',
+      });
+    } else if (!info.valid) {
+      notices.push({ type: 'warning', icon: 'fa-key', title: 'El token no tiene formato JWT', body: 'Revisa el token en el panel de sesión (ícono de llave).' });
+    } else if (info.expired && state.backend !== 'demo') {
+      notices.push({
+        type: 'warning', icon: 'fa-clock',
+        title: `El token de ${escapeHtml(state.currentUser)} venció ${escapeHtml(relativeTime(info.exp))}`,
+        body: 'El backend responderá 401. Regenera los tokens con <code class="code">node scripts/generate-frontend-tokens.js</code> y recarga, o pega uno nuevo en el panel de sesión.',
+      });
+    }
+
+    if (state.degraded) {
+      notices.push({
+        type: 'warning', icon: 'fa-triangle-exclamation',
+        title: 'Modo degradado: circuit breaker abierto',
+        body: 'El servicio de productos no respondió; el carrito validó el producto con su caché local (TTL 5 min). Tu carrito sigue guardándose en Redis.',
+      });
+    }
+
+    $('tokenAlertDot').classList.toggle('hidden', info.valid && (!info.expired || state.backend === 'demo'));
+
+    area.innerHTML = notices.map((n) => `
+      <div class="notice notice--${n.type}">
+        <i class="fa-solid ${n.icon} mt-0.5 text-base" aria-hidden="true"></i>
+        <div class="space-y-1"><p class="font-bold">${n.title}</p><p class="text-xs opacity-90 leading-relaxed">${n.body}</p></div>
+      </div>`).join('');
+  }
+
+  // ---------------------------------------------------------------------------
+  // Productos
+  // ---------------------------------------------------------------------------
+  const PRODUCT_KINDS = [
+    { match: ['audifono', 'auricular', 'headset', 'headphone', 'diadema'], icon: 'fa-headphones', tone: 'from-pink-500/25 text-pink-300', category: 'Audio', desc: 'Sonido envolvente y micrófono con cancelación de ruido.' },
+    { match: ['teclado', 'keyboard'], icon: 'fa-keyboard', tone: 'from-purple-500/25 text-purple-300', category: 'Teclados', desc: 'Switches mecánicos e iluminación RGB por tecla.' },
+    { match: ['mouse', 'raton'], icon: 'fa-computer-mouse', tone: 'from-sky-500/25 text-sky-300', category: 'Mouse', desc: 'Sensor óptico de alta precisión y respuesta de 1 ms.' },
+    { match: ['monitor', 'pantalla'], icon: 'fa-desktop', tone: 'from-emerald-500/25 text-emerald-300', category: 'Monitores', desc: 'Alta tasa de refresco para partidas sin desenfoque.' },
+    { match: ['control', 'gamepad', 'joystick'], icon: 'fa-gamepad', tone: 'from-amber-500/25 text-amber-300', category: 'Controles', desc: 'Agarre ergonómico y vibración háptica.' },
+    { match: ['ssd', 'disco', 'memoria'], icon: 'fa-hard-drive', tone: 'from-indigo-500/25 text-indigo-300', category: 'Almacenamiento', desc: 'Cargas más rápidas para tus juegos.' },
+  ];
+
+  function productMeta(prod) {
+    const name = normalize(prod.nombre);
+    const kind = PRODUCT_KINDS.find((k) => k.match.some((m) => name.includes(m)));
+    const base = kind || { icon: 'fa-box', tone: 'from-slate-500/25 text-slate-300', category: 'Accesorios', desc: 'Garantía oficial de 1 año.' };
+    return { ...base, desc: prod.descripcion || prod.desc || base.desc };
+  }
+
+  function findProduct(id) {
+    return state.products.find((p) => String(p.id) === String(id));
+  }
+
+  async function loadCatalog({ silent = false } = {}) {
+    if (!silent) {
+      state.catalog = { status: 'loading', error: null };
+      renderProducts();
+    }
+    $('reloadIcon').classList.add('animate-spin');
+    const res = await apiFetch('/api/productos');
+    $('reloadIcon').classList.remove('animate-spin');
+
+    if (res.ok && Array.isArray(res.data)) {
+      state.products = res.data;
+      state.catalog = { status: 'ok', error: null };
     } else {
-      state.isDegraded = false;
-      const alertEl = document.getElementById('degradedAlert');
-      if (alertEl) alertEl.classList.add('hidden');
-      const cbPill = document.getElementById('cbStatusPill');
-      if (cbPill) {
-        cbPill.innerHTML = `
-          <span class="w-2 h-2 rounded-full bg-purple-500"></span>
-          <span>Cerrado (Normal)</span>
-        `;
-      }
-      showToast('✔ Producto guardado con éxito en Redis (TTL 30 días)', 'success');
+      state.products = [];
+      state.catalog = { status: 'error', error: res };
     }
+    renderProducts();
+    renderCart(); // los precios del carrito dependen del catálogo
+  }
 
-    await loadCart();
-    openCartDrawer();
-  } else {
-    // Si la API falla pero estamos en modo local/previsualización, agregamos al carrito en memoria
-    if (res.status === 0 || !res.ok) {
-      const existing = state.cart.find((item) => String(item.productoId) === String(productoId));
-      if (existing) {
-        existing.cantidad += cantidad;
-      } else {
-        state.cart.push({ productoId: String(productoId), cantidad });
-      }
-      showToast('✔ Producto guardado en carrito local', 'success');
-      renderCartItems();
-      openCartDrawer();
+  function visibleProducts() {
+    const q = normalize(state.search.trim());
+    let list = state.products.filter((p) => {
+      const category = productMeta(p).category;
+      if (state.category && category !== state.category) return false;
+      return !q || normalize(p.nombre).includes(q) || normalize(category).includes(q);
+    });
+    const sorters = {
+      'price-asc': (a, b) => a.precio - b.precio,
+      'price-desc': (a, b) => b.precio - a.precio,
+      name: (a, b) => String(a.nombre).localeCompare(String(b.nombre), 'es'),
+    };
+    if (sorters[state.sort]) list = [...list].sort(sorters[state.sort]);
+    return list;
+  }
+
+  function renderCategoryFilters() {
+    const box = $('categoryFilters');
+    const counts = new Map();
+    if (state.catalog.status === 'ok') {
+      state.products.forEach((p) => {
+        const { category, icon } = productMeta(p);
+        const entry = counts.get(category) || { icon, n: 0 };
+        entry.n += 1;
+        counts.set(category, entry);
+      });
+    }
+    if (state.category && !counts.has(state.category)) state.category = '';
+    box.hidden = counts.size < 2;
+    if (box.hidden) { box.innerHTML = ''; return; }
+
+    const chip = (value, label, icon, n) => `
+      <button type="button" class="cat-chip" data-action="filter-category" data-category="${escapeHtml(value)}" aria-pressed="${state.category === value}">
+        <i class="fa-solid ${icon}" aria-hidden="true"></i>${escapeHtml(label)}<small>${n}</small>
+      </button>`;
+    box.innerHTML = chip('', 'Todos', 'fa-border-all', state.products.length)
+      + [...counts].sort((a, b) => a[0].localeCompare(b[0], 'es')).map(([cat, { icon, n }]) => chip(cat, cat, icon, n)).join('');
+  }
+
+  /** Oferta destacada del hero: el producto con mayor ahorro (dato real del catálogo). */
+  function renderFeatured() {
+    const box = $('heroFeatured');
+    if (state.catalog.status !== 'ok' || state.products.length === 0) {
+      box.hidden = true;
+      box.innerHTML = '';
+      return;
+    }
+    const prod = state.products.reduce((best, p) => (Number(p.precio) > Number(best.precio) ? p : best));
+    const meta = productMeta(prod);
+    const id = escapeHtml(String(prod.id));
+    const busy = state.pending.has(`add-${prod.id}`);
+    const canAdd = can('cart:write');
+    box.hidden = false;
+    box.innerHTML = `
+      <div class="rounded-2xl border border-white/10 bg-slate-950/70 p-4 shadow-xl">
+        <p class="text-[11px] uppercase tracking-widest text-pink-300 font-bold mb-3"><i class="fa-solid fa-fire mr-1" aria-hidden="true"></i> Mayor ahorro de hoy</p>
+        <div class="flex items-center gap-3">
+          <div class="w-14 h-14 shrink-0 rounded-xl bg-gradient-to-br ${meta.tone.split(' ')[0]} to-slate-900 flex items-center justify-center border border-white/5">
+            <i class="fa-solid ${meta.icon} ${meta.tone.split(' ')[1]} text-2xl" aria-hidden="true"></i>
+          </div>
+          <div class="min-w-0">
+            <p class="font-bold text-white text-sm truncate">${escapeHtml(prod.nombre)}</p>
+            <p class="text-xs text-slate-400 line-through tabular-nums">${formatMoney(regularPrice(prod.precio))}</p>
+            <p class="text-lg font-black text-white tabular-nums leading-tight">${formatMoney(prod.precio)}</p>
+          </div>
+        </div>
+        <div class="flex items-center justify-between gap-3 mt-3">
+          <span class="text-xs font-semibold text-emerald-400">Ahorras ${formatMoney(regularPrice(prod.precio) - prod.precio)}</span>
+          <button type="button" class="h-9 px-3.5 rounded-lg bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold flex items-center gap-1.5 transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+            data-action="add-to-cart" data-product-id="${id}" ${busy || !canAdd ? 'disabled' : ''} ${!canAdd ? 'title="Tu token no tiene el scope cart:write"' : ''}>
+            ${busy ? '<i class="fa-solid fa-spinner animate-spin" aria-hidden="true"></i> Agregando…' : '<i class="fa-solid fa-cart-plus" aria-hidden="true"></i> Agregar'}
+          </button>
+        </div>
+      </div>`;
+  }
+
+  function renderProducts() {
+    const grid = $('productsGrid');
+    const count = $('catalogCount');
+    grid.setAttribute('aria-busy', String(state.catalog.status === 'loading'));
+    renderCategoryFilters();
+    renderFeatured();
+
+    if (state.catalog.status === 'loading') {
+      count.textContent = '';
+      grid.innerHTML = Array.from({ length: 3 }, () => `
+        <div class="product-card" aria-hidden="true">
+          <div class="skeleton h-40 rounded-2xl mb-4"></div>
+          <div class="skeleton h-4 w-2/3 mb-2"></div>
+          <div class="skeleton h-3 w-full mb-6"></div>
+          <div class="skeleton h-10 w-full rounded-xl"></div>
+        </div>`).join('');
       return;
     }
 
-    if (res.status === 403) {
-      showToast('Acceso denegado (BOLA / Scopes insuficientes)', 'error');
-    } else if (res.status === 503) {
-      showToast('No se pudo validar el producto; el carrito no se alteró (Fail-Closed)', 'error');
-    } else {
-      showToast(`Error al agregar: ${res.data?.error || res.error || 'HTTP ' + res.status}`, 'error');
+    if (state.catalog.status === 'error') {
+      const res = state.catalog.error;
+      count.textContent = '';
+      const hint = res.status === 403
+        ? `<p class="text-xs text-slate-400">El token de <span class="font-mono text-slate-200">${escapeHtml(state.currentUser)}</span> no incluye el scope <code class="code">products:read</code>. Prueba con otra sesión.</p>`
+        : '';
+      grid.innerHTML = `
+        <div class="col-span-full rounded-3xl border border-dashed border-slate-800 p-10 text-center space-y-3">
+          <i class="fa-solid ${res.status === 403 ? 'fa-shield-halved text-rose-400' : 'fa-plug-circle-xmark text-slate-500'} text-4xl" aria-hidden="true"></i>
+          <p class="font-bold text-white">No se pudo cargar el catálogo</p>
+          <p class="text-sm text-slate-400 max-w-md mx-auto">${escapeHtml(describeError(res, 'ver el catálogo'))}</p>
+          ${hint}
+          <button type="button" data-action="reload-catalog" class="btn-secondary mx-auto !h-10"><i class="fa-solid fa-rotate-right" aria-hidden="true"></i> Reintentar</button>
+        </div>`;
+      return;
     }
-  }
-}
 
-// Cargar el carrito del usuario actual desde Redis
-async function loadCart() {
-  const ownerLabel = document.getElementById('cartOwnerLabel');
-  if (ownerLabel) {
-    ownerLabel.innerHTML = `Usuario: <span class="text-purple-300 font-mono font-bold">${state.currentUser}</span>`;
-  }
+    const list = visibleProducts();
+    count.textContent = `(${list.length}${list.length !== state.products.length ? ` de ${state.products.length}` : ''})`;
 
-  const res = await apiFetch(`/api/carritos/${state.currentUser}`);
+    if (list.length === 0) {
+      const filtered = state.products.length > 0;
+      const what = [state.search.trim() && `“${escapeHtml(state.search.trim())}”`, state.category && `la categoría ${escapeHtml(state.category)}`].filter(Boolean).join(' en ');
+      grid.innerHTML = `
+        <div class="col-span-full rounded-3xl border border-dashed border-slate-800 p-10 text-center space-y-2">
+          <i class="fa-solid fa-magnifying-glass text-3xl text-slate-600" aria-hidden="true"></i>
+          <p class="font-bold text-white">${filtered ? 'Sin resultados' : 'El catálogo está vacío'}</p>
+          <p class="text-sm text-slate-400">${filtered ? `Nada coincide con ${what || 'los filtros'}.` : 'Un administrador puede agregar productos.'}</p>
+          ${filtered ? '<button type="button" data-action="clear-filters" class="btn-secondary mx-auto !h-10 mt-2"><i class="fa-solid fa-filter-circle-xmark" aria-hidden="true"></i> Limpiar filtros</button>' : ''}
+        </div>`;
+      return;
+    }
 
-  if (res.ok && res.data?.productos) {
-    state.cart = res.data.productos;
-    renderCartItems();
-  } else {
-    if (res.status === 403) {
-      const list = document.getElementById('cartItemsList');
-      const countBadge = document.getElementById('cartCountBadge');
-      if (list) {
-        list.innerHTML = `
-          <div class="p-5 rounded-2xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs text-center space-y-2">
-            <i class="fa-solid fa-shield-halved text-3xl text-rose-400"></i>
-            <p class="font-bold text-sm">Acceso Denegado (BOLA / OWASP API1)</p>
-            <p class="text-[11px] text-rose-400/90">Tu token JWT no posee los permisos requeridos para acceder al carrito de <span class="font-mono font-bold">${state.currentUser}</span>.</p>
+    const canAdd = can('cart:write');
+    grid.innerHTML = list.map((prod) => {
+      const id = String(prod.id);
+      const meta = productMeta(prod);
+      const qty = state.quantities[id] || 1;
+      const busy = state.pending.has(`add-${id}`);
+      return `
+        <article class="product-card group" aria-labelledby="prod-name-${escapeHtml(id)}">
+          <div class="product-visual bg-gradient-to-br ${meta.tone.split(' ')[0]} to-slate-950">
+            <i class="fa-solid ${meta.icon} ${meta.tone.split(' ')[1]} text-6xl drop-shadow-lg group-hover:scale-110 transition-transform duration-300" aria-hidden="true"></i>
+            <span class="absolute top-3 left-3 px-2 py-0.5 rounded-full text-[10px] font-black bg-pink-500 text-white shadow">−${Math.round(FLASH_DISCOUNT * 100)}%</span>
+            <span class="absolute top-3 right-3 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-slate-950/70 text-slate-300 border border-white/10">${escapeHtml(meta.category)}</span>
           </div>
-        `;
-      }
-      if (countBadge) countBadge.textContent = '!';
-      updateTotals(0);
+          <h3 id="prod-name-${escapeHtml(id)}" class="font-extrabold text-base text-white group-hover:text-purple-200 transition-colors">${escapeHtml(prod.nombre)}</h3>
+          <p class="text-xs text-slate-400 mt-1 leading-relaxed flex-1">${escapeHtml(meta.desc)}</p>
+
+          <div class="mt-4 pt-4 border-t border-slate-800/80 space-y-3">
+            <div class="flex items-end justify-between gap-3">
+              <div class="min-w-0">
+                <div class="flex flex-wrap items-center gap-x-2 text-xs tabular-nums">
+                  <span class="text-slate-400 line-through">${formatMoney(regularPrice(prod.precio))}</span>
+                  <span class="text-emerald-400 font-semibold">−${formatMoney(regularPrice(prod.precio) - prod.precio)}</span>
+                </div>
+                <div class="text-xl font-black text-white tabular-nums">${formatMoney(prod.precio)}</div>
+              </div>
+              <div class="flex items-center gap-1 bg-slate-950 border border-slate-800 rounded-xl p-1" role="group" aria-label="Cantidad de ${escapeHtml(prod.nombre)}">
+                <button type="button" class="qty-btn" data-action="qty-decrease" data-product-id="${escapeHtml(id)}" aria-label="Disminuir cantidad" ${qty <= 1 ? 'disabled' : ''}><i class="fa-solid fa-minus" aria-hidden="true"></i></button>
+                <span id="qty-${escapeHtml(id)}" class="w-8 text-center text-sm font-mono font-black text-white tabular-nums" aria-live="polite">${qty}</span>
+                <button type="button" class="qty-btn" data-action="qty-increase" data-product-id="${escapeHtml(id)}" aria-label="Aumentar cantidad" ${qty >= 99 ? 'disabled' : ''}><i class="fa-solid fa-plus" aria-hidden="true"></i></button>
+              </div>
+            </div>
+            <button type="button" class="btn-primary" data-action="add-to-cart" data-product-id="${escapeHtml(id)}" ${busy || !canAdd ? 'disabled' : ''}
+              ${!canAdd ? 'title="Tu token no tiene el scope cart:write"' : ''}>
+              ${busy ? '<i class="fa-solid fa-spinner animate-spin" aria-hidden="true"></i> Agregando…'
+                : canAdd ? '<i class="fa-solid fa-cart-plus" aria-hidden="true"></i> Agregar al carrito'
+                  : '<i class="fa-solid fa-lock" aria-hidden="true"></i> Sin permiso para comprar'}
+            </button>
+          </div>
+        </article>`;
+    }).join('');
+  }
+
+  function changeQuantity(productId, delta) {
+    const id = String(productId);
+    state.quantities[id] = Math.max(1, Math.min(99, (state.quantities[id] || 1) + delta));
+    renderProducts();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Carrito
+  // ---------------------------------------------------------------------------
+  const cartPath = () => `/api/carritos/${encodeURIComponent(state.currentUser)}`;
+
+  async function loadCart() {
+    $('cartOwnerLabel').textContent = state.currentUser;
+    const res = await apiFetch(cartPath());
+    if (res.ok && res.data && Array.isArray(res.data.productos)) {
+      state.cart = res.data.productos.map((p) => ({ productoId: String(p.productoId), cantidad: Number(p.cantidad) }));
+      state.cartStatus = { status: 'ok', error: null };
     } else {
-      renderCartItems();
+      state.cart = [];
+      state.cartStatus = { status: 'error', error: res };
+    }
+    renderCart();
+  }
+
+  /** Aplica la marca "degraded" que devuelve el carrito cuando el circuit breaker usa caché. */
+  function applyDegraded(res) {
+    const degraded = Boolean(res.data && res.data.degraded);
+    if (degraded !== state.degraded) {
+      state.degraded = degraded;
+      renderNotices();
+      renderCircuitBreaker();
     }
   }
-}
 
-// Renderizar la lista de productos en el Drawer del carrito
-function renderCartItems() {
-  const list = document.getElementById('cartItemsList');
-  const countBadge = document.getElementById('cartCountBadge');
-  if (!list) return;
+  async function postCartItem(productoId, cantidad) {
+    const res = await apiFetch(`${cartPath()}/productos`, { method: 'POST', body: { productoId: String(productoId), cantidad } });
+    if (res.ok) applyDegraded(res);
+    return res;
+  }
 
-  const totalCount = state.cart.reduce((acc, item) => acc + item.cantidad, 0);
-  if (countBadge) countBadge.textContent = totalCount;
+  async function addToCart(productId) {
+    const id = String(productId);
+    const key = `add-${id}`;
+    if (state.pending.has(key)) return;
+    const cantidad = state.quantities[id] || 1;
+    const prod = findProduct(id);
 
-  if (state.cart.length === 0) {
-    list.innerHTML = `
-      <div class="text-center py-20 text-slate-500 space-y-3 select-none">
-        <i class="fa-solid fa-basket-shopping text-5xl text-slate-800"></i>
-        <p class="text-sm font-semibold">Tu carrito en Redis está vacío.</p>
-        <p class="text-xs text-slate-600">Explora el catálogo y agrega productos para comenzar.</p>
+    state.pending.add(key);
+    renderProducts();
+    const res = await postCartItem(id, cantidad);
+    state.pending.delete(key);
+
+    if (res.ok) {
+      state.quantities[id] = 1;
+      await loadCart();
+      bumpBadge();
+      showToast(
+        res.data && res.data.degraded
+          ? `Agregado en modo degradado: ${cantidad} × ${prod ? prod.nombre : `#${id}`}.`
+          : `Agregaste ${cantidad} × ${prod ? prod.nombre : `#${id}`} al carrito.`,
+        res.data && res.data.degraded ? 'warning' : 'success',
+      );
+    } else {
+      showToast(describeError(res, 'modificar este carrito'), 'error', 6000);
+    }
+    renderProducts();
+  }
+
+  /**
+   * Fija la cantidad de un artículo. El API solo permite sumar (POST, cantidad ≥ 1) o
+   * eliminar (DELETE), así que para disminuir se elimina y se vuelve a agregar.
+   */
+  async function setCartQuantity(productId, nextQty) {
+    const id = String(productId);
+    const item = state.cart.find((i) => i.productoId === id);
+    const key = `cart-${id}`;
+    if (!item || state.pending.has(key)) return;
+    if (nextQty > 1000) {
+      showToast('El máximo por producto es 1000 unidades.', 'warning');
+      return;
+    }
+
+    state.pending.add(key);
+    renderCart();
+    let res;
+    if (nextQty <= 0) {
+      res = await apiFetch(`${cartPath()}/productos/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    } else if (nextQty > item.cantidad) {
+      res = await postCartItem(id, nextQty - item.cantidad);
+    } else {
+      res = await apiFetch(`${cartPath()}/productos/${encodeURIComponent(id)}`, { method: 'DELETE' });
+      if (res.ok) res = await postCartItem(id, nextQty);
+    }
+    state.pending.delete(key);
+
+    if (!res.ok) showToast(describeError(res, 'modificar este carrito'), 'error', 6000);
+    else if (nextQty <= 0) showToast('Producto eliminado del carrito.', 'success');
+    await loadCart();
+  }
+
+  async function clearCart() {
+    if (state.cart.length === 0) return;
+    const ok = await confirmDialog({ title: '¿Vaciar el carrito?', text: 'Se eliminarán todos los productos guardados en Redis para esta sesión.', okLabel: 'Vaciar' });
+    if (!ok) return;
+    const res = await apiFetch(cartPath(), { method: 'DELETE' });
+    if (res.ok) showToast('Carrito vaciado.', 'success');
+    else showToast(describeError(res, 'vaciar este carrito'), 'error', 6000);
+    await loadCart();
+  }
+
+  function cartTotals() {
+    let total = 0;
+    let regular = 0;
+    let unknown = 0;
+    for (const item of state.cart) {
+      const prod = findProduct(item.productoId);
+      if (!prod) { unknown += item.cantidad; continue; }
+      total += prod.precio * item.cantidad;
+      regular += regularPrice(prod.precio) * item.cantidad;
+    }
+    return { total, regular, savings: regular - total, unknown, count: state.cart.reduce((n, i) => n + i.cantidad, 0) };
+  }
+
+  function bumpBadge() {
+    const badge = $('cartCountBadge');
+    badge.classList.remove('bump');
+    void badge.offsetWidth;
+    badge.classList.add('bump');
+  }
+
+  /** Resumen lateral del carrito (solo visible en escritorio ancho). */
+  function renderMiniCart(totals, blocked) {
+    const body = $('miniCartBody');
+    $('miniCartCount').textContent = blocked ? '' : `${totals.count} ${totals.count === 1 ? 'unidad' : 'unidades'}`;
+    $('miniCartSavings').textContent = `−${formatMoney(totals.savings)}`;
+    $('miniCartTotal').textContent = formatMoney(totals.total);
+    $('btnMiniCheckout').disabled = blocked || state.cart.length === 0;
+
+    if (state.cartStatus.status === 'loading') {
+      body.innerHTML = '<div class="space-y-2" aria-hidden="true"><div class="skeleton h-12 rounded-xl"></div><div class="skeleton h-12 rounded-xl"></div></div>';
+      return;
+    }
+    if (blocked) {
+      const res = state.cartStatus.error;
+      body.innerHTML = `
+        <div class="text-center py-6 space-y-2">
+          <i class="fa-solid ${res.status === 403 || res.status === 401 ? 'fa-shield-halved text-rose-400' : 'fa-plug-circle-xmark text-slate-500'} text-2xl" aria-hidden="true"></i>
+          <p class="text-xs text-slate-300 px-2">${escapeHtml(describeError(res, `ver el carrito de ${state.currentUser}`))}</p>
+          <button type="button" data-action="reload-cart" class="btn-secondary mx-auto !h-8 !text-xs"><i class="fa-solid fa-rotate-right" aria-hidden="true"></i> Reintentar</button>
+        </div>`;
+      return;
+    }
+    if (state.cart.length === 0) {
+      body.innerHTML = `
+        <div class="text-center py-8 space-y-2 select-none">
+          <i class="fa-solid fa-basket-shopping text-3xl text-slate-700" aria-hidden="true"></i>
+          <p class="text-sm font-semibold text-slate-300">Tu carrito está vacío</p>
+          <p class="text-xs text-slate-500">Lo que agregues aparecerá aquí.</p>
+        </div>`;
+      return;
+    }
+    body.innerHTML = state.cart.map((item) => {
+      const prod = findProduct(item.productoId);
+      const meta = prod ? productMeta(prod) : { icon: 'fa-box', tone: 'from-slate-500/25 text-slate-400' };
+      const busy = state.pending.has(`cart-${item.productoId}`);
+      const id = escapeHtml(item.productoId);
+      return `
+        <div class="group/item flex items-center gap-3 p-2 rounded-xl hover:bg-slate-800/50 transition ${busy ? 'opacity-60' : ''}">
+          <div class="w-10 h-10 shrink-0 rounded-lg bg-gradient-to-br ${meta.tone.split(' ')[0]} to-slate-900 flex items-center justify-center">
+            <i class="fa-solid ${meta.icon} ${meta.tone.split(' ')[1]}" aria-hidden="true"></i>
+          </div>
+          <div class="flex-1 min-w-0">
+            <p class="text-sm font-semibold text-white truncate">${prod ? escapeHtml(prod.nombre) : `Producto #${id}`}</p>
+            <p class="text-[11px] text-slate-400 tabular-nums">${item.cantidad} × ${prod ? formatMoney(prod.precio) : '—'}</p>
+          </div>
+          <span class="text-xs font-bold text-slate-200 tabular-nums">${prod ? formatMoney(prod.precio * item.cantidad) : ''}</span>
+          <button type="button" class="icon-btn !w-7 !h-7 text-xs opacity-60 group-hover/item:opacity-100 hover:!text-rose-300 hover:!bg-rose-500/10" data-action="cart-remove" data-product-id="${id}" aria-label="Eliminar ${prod ? escapeHtml(prod.nombre) : 'producto'} del carrito" ${busy ? 'disabled' : ''}><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>
+        </div>`;
+    }).join('');
+  }
+
+  function renderCart() {
+    const list = $('cartItemsList');
+    const totals = cartTotals();
+    const badge = $('cartCountBadge');
+    const blocked = state.cartStatus.status === 'error';
+    badge.textContent = blocked ? '!' : String(totals.count);
+    renderMiniCart(totals, blocked);
+
+    $('cartRegular').textContent = formatMoney(totals.regular);
+    $('cartSavings').textContent = `−${formatMoney(totals.savings)}`;
+    $('cartTotal').textContent = formatMoney(totals.total);
+    $('btnCheckout').disabled = blocked || state.cart.length === 0;
+    $('btnClearCart').disabled = blocked || state.cart.length === 0;
+
+    if (state.cartStatus.status === 'loading') {
+      list.innerHTML = '<div class="space-y-3" aria-hidden="true"><div class="skeleton h-16 rounded-2xl"></div><div class="skeleton h-16 rounded-2xl"></div></div>';
+      return;
+    }
+
+    if (blocked) {
+      const res = state.cartStatus.error;
+      const isAuth = res.status === 401 || res.status === 403;
+      list.innerHTML = `
+        <div class="p-5 rounded-2xl ${isAuth ? 'bg-rose-500/10 border-rose-500/30 text-rose-200' : 'bg-slate-800/50 border-slate-700 text-slate-300'} border text-center space-y-2">
+          <i class="fa-solid ${isAuth ? 'fa-shield-halved text-rose-400' : 'fa-plug-circle-xmark text-slate-500'} text-3xl" aria-hidden="true"></i>
+          <p class="font-bold text-sm">${res.status === 403 ? 'Acceso denegado (OWASP API1 · BOLA)' : 'No se pudo cargar el carrito'}</p>
+          <p class="text-xs opacity-90">${escapeHtml(describeError(res, `ver el carrito de ${state.currentUser}`))}</p>
+          <button type="button" data-action="reload-cart" class="btn-secondary mx-auto !h-9 mt-2"><i class="fa-solid fa-rotate-right" aria-hidden="true"></i> Reintentar</button>
+        </div>`;
+      return;
+    }
+
+    if (state.cart.length === 0) {
+      list.innerHTML = `
+        <div class="text-center py-16 text-slate-500 space-y-3 select-none">
+          <i class="fa-solid fa-basket-shopping text-5xl text-slate-700" aria-hidden="true"></i>
+          <p class="text-sm font-semibold text-slate-300">Tu carrito está vacío</p>
+          <p class="text-xs">Agrega productos del catálogo para empezar.</p>
+          <button type="button" data-action="close-overlay" class="btn-secondary mx-auto !h-9 mt-2">Ver catálogo</button>
+        </div>`;
+      return;
+    }
+
+    list.innerHTML = state.cart.map((item) => {
+      const prod = findProduct(item.productoId);
+      const meta = prod ? productMeta(prod) : { icon: 'fa-box', tone: 'from-slate-500/25 text-slate-400' };
+      const busy = state.pending.has(`cart-${item.productoId}`);
+      const id = escapeHtml(item.productoId);
+      return `
+        <div class="flex items-center gap-3 p-3 rounded-2xl bg-slate-950/80 border border-slate-800 ${busy ? 'opacity-60' : ''}">
+          <div class="w-12 h-12 shrink-0 rounded-xl bg-gradient-to-br ${meta.tone.split(' ')[0]} to-slate-900 flex items-center justify-center">
+            <i class="fa-solid ${meta.icon} ${meta.tone.split(' ')[1]} text-lg" aria-hidden="true"></i>
+          </div>
+          <div class="flex-1 min-w-0">
+            <p class="font-bold text-sm text-white truncate">${prod ? escapeHtml(prod.nombre) : `Producto #${id}`}</p>
+            <p class="text-[11px] text-slate-400 tabular-nums">${prod
+              ? `${formatMoney(prod.precio)} c/u · <span class="text-purple-300 font-semibold">${formatMoney(prod.precio * item.cantidad)}</span>`
+              : '<span class="text-amber-300">Precio no disponible en el catálogo</span>'}</p>
+          </div>
+          <div class="flex items-center gap-1 shrink-0" role="group" aria-label="Cantidad">
+            <button type="button" class="qty-btn !w-7 !h-7" data-action="cart-decrease" data-product-id="${id}" aria-label="Quitar una unidad" ${busy ? 'disabled' : ''}><i class="fa-solid ${item.cantidad <= 1 ? 'fa-trash-can text-rose-300' : 'fa-minus'}" aria-hidden="true"></i></button>
+            <span class="w-7 text-center text-sm font-mono font-bold text-white tabular-nums">${busy ? '<i class="fa-solid fa-spinner animate-spin text-xs" aria-hidden="true"></i>' : item.cantidad}</span>
+            <button type="button" class="qty-btn !w-7 !h-7" data-action="cart-increase" data-product-id="${id}" aria-label="Agregar una unidad" ${busy ? 'disabled' : ''}><i class="fa-solid fa-plus" aria-hidden="true"></i></button>
+          </div>
+          <button type="button" class="icon-btn !w-8 !h-8 hover:!text-rose-300 hover:!bg-rose-500/10" data-action="cart-remove" data-product-id="${id}" aria-label="Eliminar del carrito" ${busy ? 'disabled' : ''}><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>
+        </div>`;
+    }).join('') + (totals.unknown ? `<p class="text-[11px] text-amber-300/90 px-1">${totals.unknown} unidad(es) no aparecen en el catálogo actual y no suman al total.</p>` : '');
+  }
+
+  // ---------------------------------------------------------------------------
+  // Checkout (simulado: el servicio de Checkout de ADR-005 aún no existe)
+  // ---------------------------------------------------------------------------
+  function openCheckout() {
+    if (state.cart.length === 0) return;
+    const totals = cartTotals();
+    const rows = state.cart.map((item) => {
+      const prod = findProduct(item.productoId);
+      return `<li class="flex justify-between gap-3 py-2"><span class="text-slate-300">${item.cantidad} × ${prod ? escapeHtml(prod.nombre) : `Producto #${escapeHtml(item.productoId)}`}</span>
+        <span class="font-mono text-slate-200 tabular-nums">${prod ? formatMoney(prod.precio * item.cantidad) : '—'}</span></li>`;
+    }).join('');
+    $('checkoutBody').innerHTML = `
+      <ul class="divide-y divide-slate-800 text-sm">${rows}</ul>
+      <div class="flex justify-between items-baseline border-t border-slate-800 pt-3">
+        <span class="text-sm font-bold text-white">Total a pagar</span>
+        <span class="text-2xl font-black text-purple-300 tabular-nums">${formatMoney(totals.total)}</span>
       </div>
-    `;
-    updateTotals(0);
-    return;
+      <p class="text-[11px] text-emerald-300">Ahorras ${formatMoney(totals.savings)} con la venta flash.</p>
+      <div class="notice notice--info !p-3 !text-xs"><i class="fa-solid fa-circle-info mt-0.5" aria-hidden="true"></i>
+        <p>Pago simulado: el servicio de Checkout y la pasarela (ADR-005) aún no están implementados. Al confirmar se genera un número de pedido y se vacía tu carrito en Redis.</p></div>
+      <div class="flex justify-end gap-2.5">
+        <button type="button" data-action="close-overlay" class="btn-secondary">Seguir comprando</button>
+        <button type="button" id="btnConfirmOrder" data-action="confirm-order" class="btn-primary !w-auto px-5"><i class="fa-solid fa-lock" aria-hidden="true"></i> Confirmar pedido</button>
+      </div>`;
+    openOverlay('checkoutModal');
   }
 
-  let subtotal = 0;
-  list.innerHTML = '';
-
-  state.cart.forEach((item) => {
-    const prod = state.products.find((p) => String(p.id) === String(item.productoId)) || {
-      id: item.productoId,
-      nombre: `Producto #${item.productoId}`,
-      precio: 100000,
-    };
-    const itemSubtotal = prod.precio * item.cantidad;
-    subtotal += itemSubtotal;
-
-    const row = document.createElement('div');
-    row.className = 'flex items-center justify-between p-3.5 rounded-2xl bg-slate-950/80 border border-slate-800 gap-3 shadow-md';
-    row.innerHTML = `
-      <div class="flex-1 min-w-0">
-        <h4 class="font-bold text-xs text-white truncate">${prod.nombre}</h4>
-        <p class="text-[11px] text-slate-400 font-mono mt-0.5">${formatMoney(prod.precio)} x ${item.cantidad} = <span class="text-purple-300 font-bold">${formatMoney(itemSubtotal)}</span></p>
-      </div>
-
-      <div class="flex items-center gap-1.5 flex-shrink-0">
-        <!-- BOTÓN DISMINUIR CANTIDAD EN CARRITO -->
-        <button 
-          type="button" 
-          data-action="cart-qty-decrease" 
-          data-product-id="${item.productoId}" 
-          class="w-7 h-7 rounded-lg bg-slate-800 hover:bg-slate-700 active:scale-90 text-slate-300 hover:text-white text-xs font-black transition flex items-center justify-center cursor-pointer" 
-          title="Disminuir en carrito">
-          -
-        </button>
-
-        <span class="w-6 text-center text-xs font-mono font-bold text-white select-none">${item.cantidad}</span>
-
-        <!-- BOTÓN AUMENTAR CANTIDAD EN CARRITO -->
-        <button 
-          type="button" 
-          data-action="cart-qty-increase" 
-          data-product-id="${item.productoId}" 
-          class="w-7 h-7 rounded-lg bg-slate-800 hover:bg-slate-700 active:scale-90 text-slate-300 hover:text-white text-xs font-black transition flex items-center justify-center cursor-pointer" 
-          title="Aumentar en carrito">
-          +
-        </button>
-
-        <!-- BOTÓN ELIMINAR DEL CARRITO -->
-        <button 
-          type="button" 
-          data-action="cart-remove-item" 
-          data-product-id="${item.productoId}" 
-          class="w-7 h-7 rounded-lg bg-rose-500/20 hover:bg-rose-500 active:scale-90 text-rose-300 hover:text-white text-xs flex items-center justify-center transition cursor-pointer ml-1" 
-          title="Eliminar producto">
-          <i class="fa-solid fa-trash-can text-[10px]"></i>
-        </button>
-      </div>
-    `;
-    list.appendChild(row);
-  });
-
-  updateTotals(subtotal);
-}
-
-// Modificar cantidad de un artículo directamente desde el Drawer
-async function handleCartItemQuantity(productId, delta) {
-  const id = String(productId);
-  const item = state.cart.find((i) => String(i.productoId) === id);
-  if (!item) return;
-
-  if (delta > 0) {
-    await persistCartItem(id, 1);
-  } else {
-    if (item.cantidad <= 1) {
-      await removeFromCart(id);
-    } else {
-      // Disminución controlada
-      item.cantidad -= 1;
-      renderCartItems();
-      showToast(`Cantidad de producto #${id} actualizada.`, 'info');
-      // Sincronizar con el backend
-      apiFetch(`/api/carritos/${state.currentUser}/productos`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ productoId: id, cantidad: -1 }),
-      }).catch(() => {});
+  async function confirmOrder() {
+    const btn = $('btnConfirmOrder');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fa-solid fa-spinner animate-spin" aria-hidden="true"></i> Procesando…';
+    const totals = cartTotals();
+    const res = await apiFetch(cartPath(), { method: 'DELETE' });
+    if (!res.ok) {
+      btn.disabled = false;
+      btn.innerHTML = '<i class="fa-solid fa-lock" aria-hidden="true"></i> Reintentar';
+      showToast(describeError(res, 'completar el pedido'), 'error', 6000);
+      return;
     }
-  }
-}
-
-// Eliminar un producto del carrito en Redis
-async function removeFromCart(productoId) {
-  const id = String(productoId);
-  showToast(`Eliminando producto #${id} del carrito...`, 'info');
-
-  const res = await apiFetch(`/api/carritos/${state.currentUser}/productos/${id}`, {
-    method: 'DELETE',
-  });
-
-  state.cart = state.cart.filter((item) => String(item.productoId) !== id);
-  renderCartItems();
-  showToast('Producto eliminado del carrito.', 'success');
-}
-
-// Vaciar carrito completamente en Redis
-async function clearCart() {
-  if (state.cart.length === 0) {
-    showToast('El carrito ya está vacío.', 'info');
-    return;
+    const orderId = `SH-${Date.now().toString(36).toUpperCase().slice(-6)}`;
+    $('checkoutBody').innerHTML = `
+      <div class="text-center py-6 space-y-3">
+        <div class="w-16 h-16 mx-auto rounded-full bg-emerald-500/15 border border-emerald-500/40 flex items-center justify-center"><i class="fa-solid fa-check text-3xl text-emerald-400" aria-hidden="true"></i></div>
+        <p class="text-lg font-black text-white">¡Pedido confirmado!</p>
+        <p class="text-sm text-slate-400">Número de pedido <span class="font-mono font-bold text-purple-300">${orderId}</span> · ${formatMoney(totals.total)}</p>
+        <button type="button" data-action="close-all" class="btn-primary !w-auto px-6 mx-auto">Volver a la tienda</button>
+      </div>`;
+    await loadCart();
   }
 
-  if (!confirm('¿Deseas vaciar completamente tu carrito de compras?')) return;
-
-  showToast('Vaciando carrito en Redis...', 'info');
-  await apiFetch(`/api/carritos/${state.currentUser}`, { method: 'DELETE' });
-
-  state.cart = [];
-  renderCartItems();
-  showToast('Carrito vaciado exitosamente en Redis.', 'success');
-}
-
-// Actualizar cálculo de subtotal, descuento Black Friday y total
-function updateTotals(subtotal) {
-  const discount = Math.round(subtotal * 0.15);
-  const total = subtotal - discount;
-
-  const subEl = document.getElementById('cartSubtotal');
-  const discEl = document.getElementById('cartDiscount');
-  const totEl = document.getElementById('cartTotal');
-
-  if (subEl) subEl.textContent = formatMoney(subtotal);
-  if (discEl) discEl.textContent = `-${formatMoney(discount)}`;
-  if (totEl) totEl.textContent = formatMoney(total);
-}
-
-// Simulación de checkout / proceder al pago
-function checkout() {
-  if (state.cart.length === 0) {
-    showToast('Tu carrito está vacío.', 'warning');
-    return;
-  }
-  showToast('🎉 ¡Orden confirmada! Las reservas han sido consolidadas en Redis.', 'success');
-  closeCartDrawer();
-}
-
-// Control del Slide-over Drawer del Carrito
-function openCartDrawer() {
-  const drawer = document.getElementById('cartDrawer');
-  const panel = document.getElementById('cartPanel');
-  if (drawer && panel) {
-    drawer.classList.remove('pointer-events-none', 'opacity-0');
-    panel.classList.remove('translate-x-full');
-  }
-}
-
-function closeCartDrawer() {
-  const drawer = document.getElementById('cartDrawer');
-  const panel = document.getElementById('cartPanel');
-  if (drawer && panel) {
-    drawer.classList.add('opacity-0');
-    panel.classList.add('translate-x-full');
-    setTimeout(() => drawer.classList.add('pointer-events-none'), 300);
-  }
-}
-
-// Control del Modal de Ingresar Nuevo Producto
-function openNewProductModal() {
-  const modal = document.getElementById('newProductModal');
-  if (modal) {
-    modal.classList.remove('pointer-events-none', 'opacity-0');
-    const input = document.getElementById('newProdName');
-    if (input) setTimeout(() => input.focus(), 150);
-  }
-}
-
-function closeNewProductModal() {
-  const modal = document.getElementById('newProductModal');
-  if (modal) {
-    modal.classList.add('opacity-0');
-    setTimeout(() => modal.classList.add('pointer-events-none'), 300);
-  }
-}
-
-// Envío de nuevo producto (asíncrono, sin recargas ni navegación)
-async function submitNewProduct() {
-  const submitBtn = document.getElementById('btnSubmitNewProduct');
-  const nameInput = document.getElementById('newProdName');
-  const priceInput = document.getElementById('newProdPrice');
-  const descInput = document.getElementById('newProdDesc');
-
-  if (!nameInput || !priceInput) return;
-
-  const nombre = nameInput.value.trim();
-  const precio = Number(priceInput.value);
-  const desc = descInput ? descInput.value.trim() : '';
-
-  if (!nombre) {
-    showToast('Por favor escribe el nombre del producto.', 'warning');
-    nameInput.focus();
-    return;
+  // ---------------------------------------------------------------------------
+  // Nuevo producto
+  // ---------------------------------------------------------------------------
+  function renderAdminControls() {
+    const btn = $('btnOpenNewProduct');
+    const allowed = can('products:write');
+    // Sin permiso, el botón se oculta: un botón desactivado sin explicación confunde (sobre todo en táctil).
+    btn.hidden = !allowed;
+    btn.disabled = !allowed;
+    btn.title = 'Crear un producto';
   }
 
-  if (isNaN(precio) || precio <= 0) {
-    showToast('Por favor escribe un precio válido en pesos (COP).', 'warning');
-    priceInput.focus();
-    return;
+  function openNewProduct() {
+    $('newProductForm').reset();
+    $('newProductError').classList.add('hidden');
+    $('newProdPricePreview').textContent = '';
+    ['newProdName', 'newProdPrice'].forEach((id) => $(id).removeAttribute('aria-invalid'));
+    openOverlay('newProductModal');
   }
 
-  const originalHtml = submitBtn ? submitBtn.innerHTML : '';
-  if (submitBtn) {
-    submitBtn.disabled = true;
-    submitBtn.innerHTML = `<i class="fa-solid fa-spinner animate-spin"></i> <span>Ingresando...</span>`;
-  }
-
-  try {
-    const token = state.tokens.admin || state.activeToken;
-    const res = await apiFetch('/api/productos', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({ nombre, precio, desc }),
-    });
-
-    if (res.ok || res.status === 201) {
-      showToast(`✔ Producto "${nombre}" ingresado exitosamente al catálogo`, 'success');
-      nameInput.value = '';
-      priceInput.value = '';
-      if (descInput) descInput.value = '';
-      closeNewProductModal();
-      await loadCatalog();
-    } else {
-      // Fallback local inmediato si el microservicio está en mantenimiento
-      const nextId = state.products.length ? Math.max(...state.products.map((p) => p.id)) + 1 : 1;
-      state.products.push({ id: nextId, nombre, precio, desc });
-      renderProducts();
-      showToast(`✔ Producto "${nombre}" agregado al catálogo local`, 'success');
-      nameInput.value = '';
-      priceInput.value = '';
-      if (descInput) descInput.value = '';
-      closeNewProductModal();
-    }
-  } catch (err) {
-    showToast(`Error al ingresar producto: ${err.message}`, 'error');
-  } finally {
-    if (submitBtn) {
-      submitBtn.disabled = false;
-      submitBtn.innerHTML = originalHtml;
-    }
-  }
-}
-
-// Control del Modal del Monitor de Arquitectura
-function openMonitorModal() {
-  const modal = document.getElementById('monitorModal');
-  if (modal) modal.classList.remove('pointer-events-none', 'opacity-0');
-}
-
-function closeMonitorModal() {
-  const modal = document.getElementById('monitorModal');
-  if (modal) {
-    modal.classList.add('opacity-0');
-    setTimeout(() => modal.classList.add('pointer-events-none'), 300);
-  }
-}
-
-// Prueba de Ráfaga de Concurrencia (Simulación DoS y Rate Limiting NGINX)
-async function runRateLimitTest() {
-  const btn = document.getElementById('btnRateLimitTest');
-  const resDiv = document.getElementById('rateLimitResult');
-  if (!btn || !resDiv) return;
-
-  btn.disabled = true;
-  resDiv.innerHTML = '<span class="text-purple-400 font-semibold"><i class="fa-solid fa-spinner animate-spin mr-1"></i> Disparando 50 peticiones simultáneas...</span>';
-
-  const promises = [];
-  for (let i = 0; i < 50; i++) {
-    promises.push(apiFetch(`/api/carritos/${state.currentUser}`).then((r) => r.status));
-  }
-
-  const statuses = await Promise.all(promises);
-  const count200 = statuses.filter((s) => s === 200).length;
-  const count429 = statuses.filter((s) => s === 429).length;
-
-  resDiv.innerHTML = `
-    <span class="text-emerald-400 font-bold">200 OK: ${count200}</span> | 
-    <span class="text-amber-400 font-bold">429 Rate Limit: ${count429}</span>
-  `;
-  btn.disabled = false;
-  showToast(`Ráfaga concluida: ${count429} solicitudes bloqueadas con HTTP 429`, 'warning');
-}
-
-// Control del Modal de Token JWT
-function openTokenModal() {
-  const modal = document.getElementById('tokenModal');
-  const textarea = document.getElementById('jwtTextarea');
-  if (textarea) textarea.value = state.activeToken;
-  if (modal) modal.classList.remove('pointer-events-none', 'opacity-0');
-}
-
-function closeTokenModal() {
-  const modal = document.getElementById('tokenModal');
-  if (modal) {
-    modal.classList.add('opacity-0');
-    setTimeout(() => modal.classList.add('pointer-events-none'), 300);
-  }
-}
-
-function copyTokenToClipboard() {
-  const textarea = document.getElementById('jwtTextarea');
-  if (!textarea) return;
-
-  try {
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(textarea.value);
-    } else {
-      textarea.select();
-      document.execCommand('copy');
-    }
-    showToast('Token JWT copiado al portapapeles', 'success');
-  } catch {
-    showToast('Selecciona y copia el texto del token.', 'info');
-  }
-}
-
-function saveCustomToken() {
-  const textarea = document.getElementById('jwtTextarea');
-  if (!textarea) return;
-
-  state.activeToken = textarea.value.trim();
-  try {
-    localStorage.setItem(`token_${state.currentUser}`, state.activeToken);
-  } catch {}
-
-  showToast('Token personalizado aplicado con éxito.', 'success');
-  closeTokenModal();
-  loadCatalog();
-  loadCart();
-}
-
-// Selector de Sesión de Usuario
-function setupUserSelector() {
-  const select = document.getElementById('userSelector');
-  if (!select) return;
-
-  select.value = state.currentUser;
-
-  select.addEventListener('change', (e) => {
-    state.currentUser = e.target.value;
-    let stored = null;
-    try {
-      stored = localStorage.getItem(`token_${state.currentUser}`);
-    } catch {}
-
-    state.activeToken = stored || state.tokens[state.currentUser] || FALLBACK_TOKENS[state.currentUser] || '';
-    showToast(`Sesión cambiada a ${state.currentUser}`, 'info');
-    loadCatalog();
-    loadCart();
-  });
-}
-
-// Reloj de cuenta regresiva
-function setupCountdown() {
-  let seconds = 18;
-  let minutes = 42;
-  let hours = 3;
-
-  setInterval(() => {
-    if (seconds > 0) {
-      seconds--;
-    } else {
-      seconds = 59;
-      if (minutes > 0) {
-        minutes--;
-      } else {
-        minutes = 59;
-        if (hours > 0) hours--;
-      }
-    }
-
-    const sEl = document.getElementById('timerSeconds');
-    const mEl = document.getElementById('timerMinutes');
-    const hEl = document.getElementById('timerHours');
-    if (sEl) sEl.textContent = String(seconds).padStart(2, '0');
-    if (mEl) mEl.textContent = String(minutes).padStart(2, '0');
-    if (hEl) hEl.textContent = String(hours).padStart(2, '0');
-  }, 1000);
-}
-
-// DELEGACIÓN CENTRALIZADA DE CLICS (GARANTIZA QUE CADA BOTÓN FUNCIONE AL 100%)
-function setupCentralizedEvents() {
-  document.addEventListener('click', (event) => {
-    const trigger = event.target.closest('[data-action]');
-    if (!trigger) return;
-
-    // Prevenir cualquier navegación o comportamiento nativo indeseado
+  async function submitNewProduct(event) {
     event.preventDefault();
+    const nameEl = $('newProdName');
+    const priceEl = $('newProdPrice');
+    const errorEl = $('newProductError');
+    const nombre = nameEl.value.trim();
+    const precio = Number(priceEl.value);
 
-    const action = trigger.dataset.action;
-    const productId = trigger.dataset.productId;
-
-    switch (action) {
-      case 'qty-increase':
-        changeQuantity(productId, +1);
-        break;
-      case 'qty-decrease':
-        changeQuantity(productId, -1);
-        break;
-      case 'add-to-cart':
-        handleAddToCart(productId, trigger);
-        break;
-      case 'cart-qty-increase':
-        handleCartItemQuantity(productId, +1);
-        break;
-      case 'cart-qty-decrease':
-        handleCartItemQuantity(productId, -1);
-        break;
-      case 'cart-remove-item':
-        removeFromCart(productId);
-        break;
-      case 'open-cart':
-        openCartDrawer();
-        break;
-      case 'close-cart':
-        closeCartDrawer();
-        break;
-      case 'clear-cart':
-        clearCart();
-        break;
-      case 'checkout':
-        checkout();
-        break;
-      case 'open-new-product':
-        openNewProductModal();
-        break;
-      case 'close-new-product':
-        closeNewProductModal();
-        break;
-      case 'submit-new-product':
-        submitNewProduct();
-        break;
-      case 'open-monitor':
-        openMonitorModal();
-        break;
-      case 'close-monitor':
-        closeMonitorModal();
-        break;
-      case 'open-token-modal':
-        openTokenModal();
-        break;
-      case 'close-token-modal':
-        closeTokenModal();
-        break;
-      case 'copy-token':
-        copyTokenToClipboard();
-        break;
-      case 'save-token':
-        saveCustomToken();
-        break;
-      case 'test-rate-limit':
-        runRateLimitTest();
-        break;
-      case 'reload-catalog':
-        loadCatalog();
-        break;
+    const problems = [];
+    nameEl.toggleAttribute('aria-invalid', !nombre);
+    if (!nombre) problems.push('Escribe el nombre del producto.');
+    const badPrice = !Number.isFinite(precio) || precio < 1000;
+    priceEl.toggleAttribute('aria-invalid', badPrice);
+    if (badPrice) problems.push('El precio debe ser de al menos $1.000.');
+    if (problems.length) {
+      errorEl.textContent = problems.join(' ');
+      errorEl.classList.remove('hidden');
+      (nombre ? priceEl : nameEl).focus();
+      return;
     }
-  });
 
-  // Atajos de teclado en campos de nuevo producto
-  ['newProdName', 'newProdPrice', 'newProdDesc'].forEach((id) => {
-    const input = document.getElementById(id);
-    if (input) {
-      input.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') {
-          e.preventDefault();
-          submitNewProduct();
-        }
-      });
+    const submitBtn = $('btnSubmitNewProduct');
+    submitBtn.disabled = true;
+    const original = submitBtn.innerHTML;
+    submitBtn.innerHTML = '<i class="fa-solid fa-spinner animate-spin" aria-hidden="true"></i> Creando…';
+    const res = await apiFetch('/api/productos', { method: 'POST', body: { nombre, precio: Math.round(precio) } });
+    submitBtn.disabled = false;
+    submitBtn.innerHTML = original;
+
+    if (res.ok) {
+      closeOverlay('newProductModal');
+      showToast(`Producto “${nombre}” creado con ID ${res.data && res.data.id}.`, 'success');
+      await loadCatalog({ silent: true });
+    } else {
+      errorEl.textContent = describeError(res, 'crear productos');
+      errorEl.classList.remove('hidden');
     }
-  });
-}
+  }
 
-// Exposición pública en window para redundancia y compatibilidad total
-window.changeQuantity = changeQuantity;
-window.handleAddToCart = handleAddToCart;
-window.removeFromCart = removeFromCart;
-window.clearCart = clearCart;
-window.openCartDrawer = openCartDrawer;
-window.closeCartDrawer = closeCartDrawer;
-window.openNewProductModal = openNewProductModal;
-window.closeNewProductModal = closeNewProductModal;
-window.submitNewProduct = submitNewProduct;
+  // ---------------------------------------------------------------------------
+  // Monitor: prueba de rate limiting
+  // ---------------------------------------------------------------------------
+  async function runRateLimitTest() {
+    const btn = $('btnRateLimitTest');
+    const out = $('rateLimitResult');
+    const n = Number($('burstSize').value) || 150;
+    btn.disabled = true;
+    out.innerHTML = `<span class="text-purple-300"><i class="fa-solid fa-spinner animate-spin mr-1" aria-hidden="true"></i> Enviando ${n} peticiones…</span>`;
 
-// Inicialización de la aplicación
-function initApp() {
-  // Renderizado instantáneo de productos en 0 ms
-  renderProducts();
+    const started = performance.now();
+    const statuses = await Promise.all(Array.from({ length: n }, () => apiFetch(cartPath(), { timeout: 8000 }).then((r) => r.status)));
+    const ms = Math.round(performance.now() - started);
+    const groups = statuses.reduce((acc, s) => { acc[s] = (acc[s] || 0) + 1; return acc; }, {});
+    const label = (s) => ({ 0: 'Sin respuesta', 200: '200 OK', 401: '401 No autenticado', 403: '403 Prohibido', 429: '429 Rate limit' }[s] || `HTTP ${s}`);
+    const color = (s) => ({ 200: 'bg-emerald-500', 429: 'bg-amber-400', 0: 'bg-slate-600' }[s] || 'bg-rose-500');
 
-  // Configurar selectores y eventos
-  try { setupCentralizedEvents(); } catch (e) { console.error('Error setupCentralizedEvents:', e); }
-  try { setupUserSelector(); } catch (e) { console.error('Error setupUserSelector:', e); }
-  try { setupCountdown(); } catch (e) { console.error('Error setupCountdown:', e); }
+    out.innerHTML = `
+      <div class="flex h-3 rounded-full overflow-hidden bg-slate-800 mb-2">
+        ${Object.entries(groups).map(([s, c]) => `<div class="${color(Number(s))}" style="width:${(c / n) * 100}%" title="${label(Number(s))}: ${c}"></div>`).join('')}
+      </div>
+      <div class="flex flex-wrap gap-x-4 gap-y-1">
+        ${Object.entries(groups).map(([s, c]) => `<span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full ${color(Number(s))}"></span>${label(Number(s))}: <b class="text-white">${c}</b></span>`).join('')}
+        <span class="text-slate-500">${ms} ms</span>
+      </div>
+      ${state.backend === 'demo' ? '<p class="text-[11px] text-sky-300 mt-2">En modo demo no hay NGINX, así que no habrá respuestas 429.</p>' : ''}`;
+    btn.disabled = false;
+    if (groups[429]) showToast(`NGINX bloqueó ${groups[429]} de ${n} peticiones con HTTP 429.`, 'warning');
+    loadCart();
+  }
 
-  // Comprobar estado de conexión con el backend
-  checkBackendConnection();
-  setInterval(checkBackendConnection, 10000);
+  // ---------------------------------------------------------------------------
+  // Sesión / token
+  // ---------------------------------------------------------------------------
+  async function loadDevTokens() {
+    try {
+      const res = await fetch(`${apiBaseUrl()}/dev-tokens.json`, { cache: 'no-store', signal: AbortSignal.timeout ? AbortSignal.timeout(2500) : undefined });
+      if (res.ok) {
+        const data = await res.json();
+        USERS.forEach((u) => { if (typeof data[u] === 'string') state.tokens[u] = data[u]; });
+      }
+    } catch { /* sin tokens: se mostrará un aviso */ }
+  }
 
-  // Carga asíncrona de tokens, catálogo y carritos desde Redis
-  initTokens()
-    .then(() => {
-      loadCatalog();
-      loadCart();
-    })
-    .catch((err) => {
-      console.error('Error initTokens:', err);
-      loadCatalog();
-      loadCart();
+  function selectUser(user) {
+    state.currentUser = user;
+    storage.set('shophero_user', user);
+    const custom = storage.get(`shophero_token_${user}`);
+    state.tokenIsCustom = Boolean(custom);
+    state.activeToken = custom || state.tokens[user] || '';
+    $('userSelector').value = user;
+    $('cartOwnerLabel').textContent = user;
+    $('miniCartOwner').textContent = user;
+    renderNotices();
+    renderAdminControls();
+  }
+
+  function renderTokenModal() {
+    const info = tokenInfo();
+    $('jwtTextarea').value = state.activeToken;
+    $('btnResetToken').disabled = !state.tokenIsCustom;
+    const chips = (items, cls) => items.length ? items.map((s) => `<span class="px-2 py-0.5 rounded-md border ${cls} font-mono text-[11px]">${escapeHtml(s)}</span>`).join(' ') : '<span class="text-slate-500">ninguno</span>';
+    if (!info.valid) {
+      $('tokenClaims').innerHTML = `<p class="notice notice--warning !p-3">${info.present ? 'El texto actual no es un JWT válido.' : 'No hay token para esta sesión.'}</p>`;
+      return;
+    }
+    $('tokenClaims').innerHTML = `
+      <dl class="grid grid-cols-[6rem_1fr] gap-y-2 items-center">
+        <dt class="text-slate-400">Usuario (sub)</dt><dd class="font-mono text-white">${escapeHtml(info.sub)}</dd>
+        <dt class="text-slate-400">Scopes</dt><dd class="flex flex-wrap gap-1">${chips(info.scopes, 'border-purple-500/30 bg-purple-500/10 text-purple-200')}</dd>
+        <dt class="text-slate-400">Roles</dt><dd class="flex flex-wrap gap-1">${chips(info.roles, 'border-amber-500/30 bg-amber-500/10 text-amber-200')}</dd>
+        <dt class="text-slate-400">Expira</dt><dd class="${info.expired ? 'text-rose-300 font-bold' : 'text-emerald-300'}">${info.exp ? `${escapeHtml(info.exp.toLocaleString('es-CO'))} (${escapeHtml(relativeTime(info.exp))})` : 'sin fecha'}</dd>
+        <dt class="text-slate-400">Origen</dt><dd class="text-slate-300">${state.tokenIsCustom ? 'Token personalizado (este navegador)' : 'frontend/dev-tokens.json'}</dd>
+      </dl>`;
+  }
+
+  async function refreshSession() {
+    state.cartStatus = { status: 'loading', error: null };
+    renderCart();
+    await Promise.all([loadCatalog(), loadCart()]);
+    renderAdminControls();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Cuenta regresiva hasta la medianoche local
+  // ---------------------------------------------------------------------------
+  function tickCountdown() {
+    const now = new Date();
+    const end = new Date(now);
+    end.setHours(24, 0, 0, 0);
+    const s = Math.max(0, Math.floor((end - now) / 1000));
+    $('timerHours').textContent = String(Math.floor(s / 3600)).padStart(2, '0');
+    $('timerMinutes').textContent = String(Math.floor((s % 3600) / 60)).padStart(2, '0');
+    $('timerSeconds').textContent = String(s % 60).padStart(2, '0');
+  }
+
+  // ---------------------------------------------------------------------------
+  // Eventos
+  // ---------------------------------------------------------------------------
+  function onClick(event) {
+    const trigger = event.target.closest('[data-action]');
+    if (!trigger || trigger.disabled) return;
+    const { action, productId, category } = trigger.dataset;
+    const item = productId ? state.cart.find((i) => i.productoId === productId) : null;
+
+    const actions = {
+      'go-top': () => window.scrollTo({ top: 0 }),
+      'qty-increase': () => changeQuantity(productId, 1),
+      'qty-decrease': () => changeQuantity(productId, -1),
+      'add-to-cart': () => addToCart(productId),
+      'cart-increase': () => item && setCartQuantity(productId, item.cantidad + 1),
+      'cart-decrease': () => item && setCartQuantity(productId, item.cantidad - 1),
+      'cart-remove': () => setCartQuantity(productId, 0),
+      'reload-cart': () => loadCart(),
+      'open-cart': () => { openOverlay('cartDrawer'); loadCart(); },
+      'clear-cart': () => clearCart(),
+      'open-checkout': () => openCheckout(),
+      'confirm-order': () => confirmOrder(),
+      'open-new-product': () => openNewProduct(),
+      'open-monitor': () => { openOverlay('monitorModal'); checkBackend(); },
+      'test-rate-limit': () => runRateLimitTest(),
+      'open-token-modal': () => { renderTokenModal(); openOverlay('tokenModal'); },
+      'copy-token': () => copyToken(),
+      'save-token': () => saveCustomToken(),
+      'reset-token': () => resetToken(),
+      'reload-catalog': () => loadCatalog(),
+      'filter-category': () => { state.category = category || ''; renderProducts(); },
+      'clear-filters': () => {
+        state.category = '';
+        state.search = '';
+        $('searchInput').value = '';
+        renderProducts();
+      },
+      'close-overlay': () => closeOverlay(),
+      'close-all': () => { closeOverlay('checkoutModal'); closeOverlay('cartDrawer'); },
+      'confirm-ok': () => { resolveConfirm(true); closeOverlay('confirmModal'); },
+      'confirm-cancel': () => closeOverlay('confirmModal'),
+    };
+    if (actions[action]) {
+      event.preventDefault();
+      actions[action]();
+    }
+  }
+
+  async function copyToken() {
+    try {
+      await navigator.clipboard.writeText($('jwtTextarea').value);
+      showToast('Token copiado al portapapeles.', 'success');
+    } catch {
+      $('jwtTextarea').select();
+      showToast('Selecciona el texto y cópialo con Ctrl+C.', 'info');
+    }
+  }
+
+  function saveCustomToken() {
+    const value = $('jwtTextarea').value.trim();
+    if (value === (state.tokens[state.currentUser] || '')) {
+      resetToken();
+      return;
+    }
+    storage.set(`shophero_token_${state.currentUser}`, value);
+    selectUser(state.currentUser);
+    closeOverlay('tokenModal');
+    showToast('Token personalizado aplicado.', 'success');
+    refreshSession();
+  }
+
+  function resetToken() {
+    storage.remove(`shophero_token_${state.currentUser}`);
+    selectUser(state.currentUser);
+    renderTokenModal();
+    showToast('Se restableció el token de desarrollo.', 'info');
+    refreshSession();
+  }
+
+  function bindEvents() {
+    document.addEventListener('click', onClick);
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && topOverlay()) closeOverlay();
+      // Atajo "/" para buscar (como en muchas tiendas y sitios de documentación).
+      const typing = e.target.closest && e.target.closest('input, textarea, select, [contenteditable="true"]');
+      if (e.key === '/' && !typing && !topOverlay() && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+        $('searchInput').focus();
+      }
     });
-}
 
-// Inicialización resiliente según el estado del documento
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', initApp);
-} else {
-  initApp();
-}
+    $('userSelector').addEventListener('change', (e) => {
+      selectUser(e.target.value);
+      showToast(`Sesión cambiada a ${e.target.value}.`, 'info', 2500);
+      refreshSession();
+    });
+
+    let searchTimer;
+    $('searchInput').addEventListener('input', (e) => {
+      clearTimeout(searchTimer);
+      searchTimer = setTimeout(() => { state.search = e.target.value; renderProducts(); }, 120);
+    });
+    $('sortSelect').addEventListener('change', (e) => { state.sort = e.target.value; renderProducts(); });
+
+    $('newProductForm').addEventListener('submit', submitNewProduct);
+    $('newProdPrice').addEventListener('input', (e) => {
+      const v = Number(e.target.value);
+      $('newProdPricePreview').textContent = v >= 1000 ? `${formatMoney(v)} · precio antes de la oferta: ${formatMoney(regularPrice(v))}` : '';
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Inicio
+  // ---------------------------------------------------------------------------
+  async function init() {
+    bindEvents();
+    tickCountdown();
+    setInterval(tickCountdown, 1000);
+    renderProducts();
+    renderCart();
+    renderCircuitBreaker();
+
+    const savedUser = storage.get('shophero_user');
+    await Promise.all([loadDevTokens(), checkBackend()]);
+    selectUser(USERS.includes(savedUser) ? savedUser : 'usuario_1');
+    await refreshSession();
+    setInterval(checkBackend, HEALTH_INTERVAL_MS);
+  }
+
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+  else init();
+})();

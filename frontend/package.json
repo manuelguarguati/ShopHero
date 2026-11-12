@@ -1,0 +1,13 @@
+{
+  "name": "shophero-frontend",
+  "private": true,
+  "description": "Interfaz web de ShopHero. styles.css se versiona compilado; solo hace falta reconstruirlo si cambian las clases.",
+  "scripts": {
+    "build:css": "tailwindcss -i ./src/input.css -o ./styles.css --minify",
+    "watch:css": "tailwindcss -i ./src/input.css -o ./styles.css --watch"
+  },
+  "devDependencies": {
+    "@tailwindcss/cli": "^4.1.0",
+    "tailwindcss": "^4.1.0"
+  }
+}

@@ -3,424 +3,421 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ShopHero — Venta Flash & Black Friday Cloud-Native</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-  <script>
-    tailwind.config = {
-      darkMode: 'class',
-      theme: {
-        extend: {
-          colors: {
-            brand: {
-              50: '#fdf4ff',
-              500: '#a855f7',
-              600: '#9333ea',
-              700: '#7e22ce',
-            },
-            accent: {
-              400: '#38bdf8',
-              500: '#0ea5e9',
-            }
-          }
-        }
-      }
-    }
-  </script>
-  <style>
-    @keyframes pulse-slow {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.6; }
-    }
-    .animate-pulse-slow {
-      animation: pulse-slow 3s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-    }
-    .glassmorphism {
-      background: rgba(15, 23, 42, 0.88);
-      backdrop-filter: blur(14px);
-      border: 1px solid rgba(255, 255, 255, 0.08);
-    }
-    /* Scrollbar estilizada */
-    ::-webkit-scrollbar {
-      width: 6px;
-    }
-    ::-webkit-scrollbar-track {
-      background: rgba(15, 23, 42, 0.6);
-    }
-    ::-webkit-scrollbar-thumb {
-      background: rgba(168, 85, 247, 0.4);
-      border-radius: 9999px;
-    }
-    ::-webkit-scrollbar-thumb:hover {
-      background: rgba(168, 85, 247, 0.7);
-    }
-  </style>
+  <meta name="description" content="ShopHero — tienda de venta flash Black Friday sobre microservicios cloud-native.">
+  <meta name="theme-color" content="#020617">
+  <title>ShopHero — Venta Flash Black Friday</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%239333ea'/%3E%3Cpath d='M18 4 8 18h7l-2 10 11-15h-7z' fill='white'/%3E%3C/svg%3E">
+  <!-- Estilos 100 % locales: funcionan sin internet (Tailwind compilado + Font Awesome empaquetado) -->
+  <link rel="stylesheet" href="vendor/fontawesome/css/fontawesome.min.css">
+  <link rel="stylesheet" href="vendor/fontawesome/css/solid.min.css">
+  <link rel="stylesheet" href="vendor/fontawesome/css/regular.min.css">
+  <link rel="stylesheet" href="styles.css">
 </head>
-<body class="h-full flex flex-col font-sans selection:bg-purple-500 selection:text-white bg-slate-950">
+<body class="min-h-full flex flex-col font-sans antialiased bg-slate-950 selection:bg-purple-500 selection:text-white">
 
-  <!-- BARRA SUPERIOR DE ANUNCIOS -->
-  <div class="bg-gradient-to-r from-purple-700 via-indigo-600 to-pink-600 text-white text-xs font-semibold py-2 px-4 text-center tracking-wider flex items-center justify-center gap-2 shadow-md select-none">
-    <span class="inline-block animate-bounce">⚡</span>
-    <span class="font-extrabold">¡BLACK FRIDAY FLASH SALE! DESCUENTOS HASTA 50% EN PERIFÉRICOS GAMER</span>
-    <span class="hidden md:inline text-purple-200">| TTL RESERVA: 5 MIN | PERSISTENCIA REDIS: 30 DÍAS</span>
-    <span class="inline-block animate-bounce">⚡</span>
+  <a href="#catalogo" class="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-[60] focus:px-4 focus:py-2 focus:rounded-lg focus:bg-purple-600 focus:text-white">Saltar al catálogo</a>
+
+  <!-- BARRA DE ANUNCIO -->
+  <div class="bg-gradient-to-r from-purple-700 via-indigo-600 to-pink-600 text-white text-[11px] sm:text-xs font-semibold py-2 px-4 text-center tracking-wide select-none">
+    <i class="fa-solid fa-bolt mr-1" aria-hidden="true"></i>
+    <span class="font-extrabold">BLACK FRIDAY FLASH SALE</span>
+    <span class="hidden sm:inline"> · hasta 30 % de descuento en periféricos gamer</span>
+    <span class="hidden md:inline text-purple-200"> · Reserva 5 min · Carrito guardado 30 días</span>
   </div>
 
-  <!-- NAVEGACIÓN PRINCIPAL (HEADER) -->
-  <header class="sticky top-0 z-40 glassmorphism border-b border-slate-800">
-    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-4">
-      
-      <!-- LOGO -->
-      <div class="flex items-center gap-3 select-none cursor-pointer" data-action="reload-catalog">
-        <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-purple-600 to-indigo-500 flex items-center justify-center shadow-lg shadow-purple-500/25 text-white text-xl font-black">
-          <i class="fa-solid fa-bolt"></i>
+  <!-- ENCABEZADO -->
+  <header class="sticky top-0 z-40 glass border-b border-white/5">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-3">
+
+      <button type="button" data-action="go-top" class="shrink-0 flex items-center gap-2.5 select-none cursor-pointer rounded-xl focus-visible:outline-2 focus-visible:outline-purple-400" aria-label="ShopHero, ir al inicio">
+        <span class="w-9 h-9 rounded-xl bg-gradient-to-tr from-purple-600 to-indigo-500 flex items-center justify-center shadow-lg shadow-purple-500/25 text-white text-lg">
+          <i class="fa-solid fa-bolt" aria-hidden="true"></i>
+        </span>
+        <span class="hidden sm:inline text-xl font-extrabold tracking-tight bg-gradient-to-r from-white to-purple-300 bg-clip-text text-transparent">ShopHero</span>
+      </button>
+
+      <div class="flex items-center gap-2 sm:gap-3 min-w-0">
+        <!-- Estado del backend -->
+        <div id="backendStatusPill" class="status-pill status-pill--checking hidden lg:flex" role="status" aria-live="polite">
+          <span class="status-dot"></span>
+          <span id="backendStatusText">Conectando…</span>
         </div>
-        <div>
-          <span class="text-xl font-extrabold tracking-tight bg-gradient-to-r from-white via-slate-100 to-purple-300 bg-clip-text text-transparent">ShopHero</span>
-          <span class="hidden sm:inline-block ml-1.5 text-[10px] font-bold px-2 py-0.5 rounded bg-purple-500/20 text-purple-300 border border-purple-500/30">CLOUD-NATIVE</span>
+
+        <!-- Sesión -->
+        <div class="flex items-center gap-1 bg-slate-900/90 border border-slate-800 rounded-xl p-1 text-xs min-w-0">
+          <label for="userSelector" class="hidden sm:flex items-center text-slate-400 pl-2 pr-1 font-medium">
+            <i class="fa-solid fa-user-shield mr-1.5 text-purple-400" aria-hidden="true"></i>Sesión
+          </label>
+          <select id="userSelector" class="min-w-0 bg-slate-800 text-slate-100 font-semibold rounded-lg px-2 py-1.5 border border-slate-700 focus:outline-none focus:ring-2 focus:ring-purple-500 text-xs cursor-pointer max-w-[8.5rem] sm:max-w-[9.5rem]">
+            <option value="usuario_1">usuario_1 · Cliente</option>
+            <option value="usuario_2">usuario_2 · Cliente</option>
+            <option value="admin">admin · Administrador</option>
+          </select>
+          <button type="button" data-action="open-token-modal" class="relative shrink-0 text-slate-400 hover:text-purple-300 hover:bg-slate-800 w-8 h-8 rounded-lg transition cursor-pointer" aria-label="Ver detalles del token JWT">
+            <i class="fa-solid fa-key" aria-hidden="true"></i>
+            <span id="tokenAlertDot" class="hidden absolute top-1 right-1 w-2 h-2 rounded-full bg-amber-400"></span>
+          </button>
         </div>
-      </div>
 
-      <!-- BARRA DE SESIÓN / IDENTIDAD JWT -->
-      <div class="flex items-center gap-2 bg-slate-900/90 border border-slate-800 rounded-xl p-1.5 text-xs shadow-inner">
-        <span class="hidden sm:inline text-slate-400 pl-2 font-medium"><i class="fa-solid fa-user-shield mr-1 text-purple-400"></i> Sesión:</span>
-        <select id="userSelector" class="bg-slate-800 text-slate-200 font-semibold rounded-lg px-2.5 py-1 border border-slate-700 focus:outline-none focus:ring-2 focus:ring-purple-500 text-xs cursor-pointer">
-          <option value="usuario_1">👤 usuario_1 (Cliente)</option>
-          <option value="usuario_2">👤 usuario_2 (Otro Cliente)</option>
-          <option value="admin">🛡️ admin (Administrador)</option>
-        </select>
-        <button type="button" id="btnTokenInfo" data-action="open-token-modal" title="Ver token JWT activo" class="text-slate-400 hover:text-purple-300 hover:bg-slate-800 px-2 py-1 rounded-lg transition cursor-pointer">
-          <i class="fa-solid fa-key"></i>
-        </button>
-      </div>
-
-      <!-- ESTADO DEL BACKEND EN TIEMPO REAL -->
-      <div id="backendStatusPill" class="hidden lg:flex items-center gap-2 px-3 py-1.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs font-bold shadow-sm select-none" title="Conexión en vivo con API Gateway NGINX, Redis y Microservicios">
-        <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
-        <span id="backendStatusText">Backend Activo (:8080)</span>
-      </div>
-
-      <!-- BOTONES DE ACCIÓN RÁPIDA -->
-      <div class="flex items-center gap-2.5">
-        <!-- MONITOR DE ARQUITECTURA -->
-        <button type="button" id="btnToggleMonitor" data-action="open-monitor" class="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-800/90 hover:bg-slate-700/90 text-xs font-semibold text-slate-300 border border-slate-700 transition cursor-pointer shadow-sm">
-          <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
-          <span>Tríada Monitor</span>
+        <button type="button" data-action="open-monitor" class="hidden md:flex items-center gap-2 px-3 h-10 rounded-xl bg-slate-900 hover:bg-slate-800 text-xs font-semibold text-slate-300 border border-slate-800 transition cursor-pointer">
+          <i class="fa-solid fa-network-wired text-purple-400" aria-hidden="true"></i>
+          <span>Arquitectura</span>
         </button>
 
-        <!-- BOTÓN CARRITO -->
-        <button type="button" id="btnOpenCart" data-action="open-cart" class="relative flex items-center gap-2.5 px-4 py-2 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 active:scale-95 text-white font-bold text-xs sm:text-sm shadow-lg shadow-purple-600/30 transition cursor-pointer">
-          <i class="fa-solid fa-cart-shopping"></i>
+        <button type="button" data-action="open-cart" class="relative shrink-0 flex items-center gap-2 px-3.5 h-10 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 active:scale-95 text-white font-bold text-sm shadow-lg shadow-purple-600/30 transition cursor-pointer" aria-label="Abrir carrito">
+          <i class="fa-solid fa-cart-shopping" aria-hidden="true"></i>
           <span class="hidden sm:inline">Carrito</span>
-          <span id="cartCountBadge" class="px-2 py-0.5 rounded-full bg-pink-500 text-white text-xs font-extrabold shadow-sm">0</span>
+          <span id="cartCountBadge" class="min-w-6 px-1.5 py-0.5 rounded-full bg-pink-500 text-white text-[11px] font-extrabold leading-none text-center">0</span>
         </button>
       </div>
-
     </div>
   </header>
 
-  <!-- CONTENIDO PRINCIPAL -->
-  <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
+  <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 space-y-6 sm:space-y-8">
 
-    <!-- HERO FLASH SALE BANNER -->
-    <section class="relative overflow-hidden rounded-3xl bg-gradient-to-br from-purple-950/80 via-slate-900 to-indigo-950/90 border border-purple-500/30 p-6 md:p-10 shadow-2xl">
-      <div class="absolute -right-20 -top-20 w-80 h-80 bg-purple-500/15 rounded-full blur-3xl pointer-events-none"></div>
-      <div class="absolute -left-20 -bottom-20 w-80 h-80 bg-indigo-500/15 rounded-full blur-3xl pointer-events-none"></div>
+    <!-- AVISOS (token vencido, modo demo, modo degradado) -->
+    <div id="noticeArea" class="space-y-3 empty:hidden" aria-live="polite"></div>
 
-      <div class="relative z-10 flex flex-col md:flex-row items-center justify-between gap-6">
-        <div class="space-y-3 text-center md:text-left">
-          <div class="inline-flex items-center gap-2 px-3.5 py-1 rounded-full bg-purple-500/15 border border-purple-500/40 text-purple-300 text-xs font-bold tracking-wide">
-            <span class="w-2 h-2 rounded-full bg-pink-500 animate-ping"></span>
-            VENTA FLASH BLACK FRIDAY
-          </div>
-          <h1 class="text-3xl md:text-5xl font-black tracking-tight text-white leading-tight">
-            Periféricos Gamer de Alto Rendimiento
+    <!-- HERO -->
+    <section class="hero relative overflow-hidden rounded-3xl bg-gradient-to-br from-purple-950/80 via-slate-900 to-indigo-950/90 border border-purple-500/25 p-6 md:p-10 xl:p-12 shadow-2xl" aria-labelledby="heroTitle">
+      <div class="absolute -right-24 -top-24 w-96 h-96 bg-purple-500/20 rounded-full blur-3xl pointer-events-none"></div>
+      <div class="absolute -left-24 -bottom-24 w-80 h-80 bg-pink-500/10 rounded-full blur-3xl pointer-events-none"></div>
+      <div class="hero-grid absolute inset-0 pointer-events-none" aria-hidden="true"></div>
+
+      <div class="relative grid gap-8 lg:gap-12 lg:grid-cols-[minmax(0,1fr)_20rem] items-center">
+        <div class="space-y-5 text-center lg:text-left">
+          <span class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-pink-500/15 border border-pink-500/40 text-pink-200 text-xs font-bold tracking-wide">
+            <span class="relative flex w-2 h-2"><span class="absolute inline-flex h-full w-full rounded-full bg-pink-400 opacity-75 animate-ping"></span><span class="relative inline-flex w-2 h-2 rounded-full bg-pink-500"></span></span>
+            VENTA FLASH EN CURSO
+          </span>
+          <h1 id="heroTitle" class="text-3xl md:text-5xl xl:text-6xl font-black tracking-tight text-white leading-[1.05] text-balance">
+            Periféricos gamer a precio de <span class="bg-gradient-to-r from-pink-400 to-purple-400 bg-clip-text text-transparent">Black Friday</span>
           </h1>
-          <p class="text-slate-300 text-sm md:text-base max-w-xl">
-            Catálogo reactivo cloud-native con consistencia de carritos en Redis Cluster, circuit breaker Opossum y autenticación Zero-Trust JWT.
+          <p class="text-slate-300 text-sm md:text-base lg:text-lg max-w-xl mx-auto lg:mx-0 leading-relaxed">
+            Agrega al carrito y tu selección queda guardada 30 días. Las unidades se reservan durante 5 minutos al iniciar el pago.
           </p>
+          <div class="flex flex-wrap justify-center lg:justify-start gap-3 pt-1">
+            <a href="#catalogo" class="h-11 px-5 rounded-xl bg-white text-slate-950 hover:bg-purple-100 font-extrabold text-sm flex items-center gap-2 shadow-lg shadow-purple-900/40 transition">
+              <i class="fa-solid fa-bolt text-purple-600" aria-hidden="true"></i> Ver ofertas
+            </a>
+            <button type="button" data-action="open-cart" class="h-11 px-5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/15 text-white font-bold text-sm flex items-center gap-2 transition cursor-pointer">
+              <i class="fa-solid fa-cart-shopping" aria-hidden="true"></i> Ver mi carrito
+            </button>
+          </div>
+          <div class="flex md:hidden flex-wrap justify-center gap-2 pt-1 text-[11px] font-semibold">
+            <span class="chip"><i class="fa-solid fa-truck-fast text-sky-400" aria-hidden="true"></i> Envío nacional</span>
+            <span class="chip"><i class="fa-solid fa-shield-halved text-emerald-400" aria-hidden="true"></i> Pago protegido</span>
+            <span class="chip"><i class="fa-solid fa-clock text-amber-400" aria-hidden="true"></i> Reserva 5 min</span>
+          </div>
         </div>
 
-        <!-- RELOJ CUENTA REGRESIVA -->
-        <div class="flex items-center gap-3 bg-slate-950/90 p-4 rounded-2xl border border-slate-800 shadow-xl select-none">
-          <div class="text-center px-2.5">
-            <div id="timerHours" class="text-2xl md:text-3xl font-black text-purple-400">03</div>
-            <div class="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Horas</div>
+        <div class="mx-auto lg:mx-0 w-full max-w-xs lg:max-w-none space-y-4">
+          <div class="text-center space-y-2">
+          <p class="text-[11px] uppercase tracking-widest text-slate-400 font-bold">La oferta termina en</p>
+          <div class="flex items-center justify-center gap-2 bg-slate-950/80 p-4 rounded-2xl border border-slate-800 shadow-xl select-none" role="timer" aria-label="Tiempo restante de la oferta">
+            <div class="countdown-cell"><span id="timerHours">00</span><small>Horas</small></div>
+            <span class="text-slate-600 font-black text-2xl" aria-hidden="true">:</span>
+            <div class="countdown-cell"><span id="timerMinutes">00</span><small>Min</small></div>
+            <span class="text-slate-600 font-black text-2xl" aria-hidden="true">:</span>
+            <div class="countdown-cell"><span id="timerSeconds" class="!text-pink-400">00</span><small>Seg</small></div>
           </div>
-          <span class="text-slate-600 font-black text-2xl">:</span>
-          <div class="text-center px-2.5">
-            <div id="timerMinutes" class="text-2xl md:text-3xl font-black text-purple-400">42</div>
-            <div class="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Min</div>
           </div>
-          <span class="text-slate-600 font-black text-2xl">:</span>
-          <div class="text-center px-2.5">
-            <div id="timerSeconds" class="text-2xl md:text-3xl font-black text-pink-400">18</div>
-            <div class="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Seg</div>
-          </div>
+          <!-- Oferta destacada (se llena desde el catálogo; solo en pantallas grandes) -->
+          <div id="heroFeatured" class="hidden lg:block" hidden></div>
         </div>
       </div>
     </section>
 
-    <!-- ALERTA DE MODO DEGRADADO (CIRCUIT BREAKER) -->
-    <div id="degradedAlert" class="hidden p-4 rounded-2xl bg-amber-500/15 border border-amber-500/40 text-amber-200 flex items-start gap-3.5 shadow-xl transition-all">
-      <i class="fa-solid fa-triangle-exclamation text-amber-400 text-2xl mt-0.5"></i>
-      <div>
-        <h4 class="font-bold text-sm text-amber-300">Modo Degradado Activo (Circuit Breaker Opossum)</h4>
-        <p class="text-xs text-amber-200/90 mt-0.5">
-          El microservicio de productos no respondió directamente; la validación se resolvió exitosamente mediante la caché local del carrito (TTL 5 min). La persistencia en Redis continúa totalmente operativa.
-        </p>
+    <!-- BENEFICIOS (tablet y escritorio) -->
+    <section class="hidden md:grid grid-cols-2 lg:grid-cols-4 gap-4" aria-label="Ventajas de comprar en ShopHero">
+      <div class="benefit">
+        <span class="benefit-icon bg-sky-500/15 text-sky-300"><i class="fa-solid fa-truck-fast" aria-hidden="true"></i></span>
+        <div><p class="benefit-title">Envío nacional</p><p class="benefit-text">Llevamos tu pedido a todo el país.</p></div>
       </div>
-    </div>
+      <div class="benefit">
+        <span class="benefit-icon bg-emerald-500/15 text-emerald-300"><i class="fa-solid fa-shield-halved" aria-hidden="true"></i></span>
+        <div><p class="benefit-title">Pago protegido</p><p class="benefit-text">Cada operación exige un token JWT con permisos.</p></div>
+      </div>
+      <div class="benefit">
+        <span class="benefit-icon bg-amber-500/15 text-amber-300"><i class="fa-solid fa-clock" aria-hidden="true"></i></span>
+        <div><p class="benefit-title">Reserva de 5 min</p><p class="benefit-text">Tus unidades quedan apartadas al iniciar el pago.</p></div>
+      </div>
+      <div class="benefit">
+        <span class="benefit-icon bg-purple-500/15 text-purple-300"><i class="fa-solid fa-floppy-disk" aria-hidden="true"></i></span>
+        <div><p class="benefit-title">Carrito por 30 días</p><p class="benefit-text">Tu selección se guarda aunque cierres el navegador.</p></div>
+      </div>
+    </section>
 
-    <!-- SECCIÓN DE PRODUCTOS DEL CATÁLOGO -->
-    <section class="space-y-4">
-      <div class="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 class="text-xl md:text-2xl font-black tracking-tight text-white flex items-center gap-2.5">
-            <i class="fa-solid fa-boxes-stacked text-purple-400"></i>
-            Catálogo Oficial de Productos
+    <!-- CATÁLOGO -->
+    <div class="xl:grid xl:grid-cols-[minmax(0,1fr)_21rem] xl:gap-8 xl:items-start">
+    <section id="catalogo" class="space-y-5 scroll-mt-24 min-w-0" aria-labelledby="catalogTitle">
+      <div class="flex flex-col lg:flex-row lg:items-end justify-between gap-4">
+        <div class="min-w-0">
+          <h2 id="catalogTitle" class="text-xl md:text-2xl font-black tracking-tight text-white flex items-center gap-2.5">
+            <i class="fa-solid fa-boxes-stacked text-purple-400" aria-hidden="true"></i>
+            Catálogo
+            <span id="catalogCount" class="text-sm font-semibold text-slate-500"></span>
           </h2>
-          <p class="text-xs text-slate-400 mt-0.5">Servido desde <code class="text-purple-300 bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800 font-mono">/api/productos</code> con validación Bearer JWT</p>
+          <p class="text-xs text-slate-400 mt-1">Servido por <code class="code">GET /api/productos</code> a través del API Gateway</p>
         </div>
-        
-        <div class="flex items-center gap-2">
-          <!-- BOTÓN INGRESAR PRODUCTO NUEVO -->
-          <button type="button" id="btnOpenNewProductModal" data-action="open-new-product" class="text-xs font-bold text-white flex items-center gap-2 px-3.5 py-2 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 active:scale-95 shadow-md shadow-purple-600/25 transition cursor-pointer">
-            <i class="fa-solid fa-plus"></i>
-            <span>Ingresar Producto</span>
+
+        <div class="flex flex-wrap lg:flex-nowrap items-center gap-2">
+          <div class="relative w-full sm:w-auto sm:flex-1 lg:flex-none lg:w-64">
+            <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-xs" aria-hidden="true"></i>
+            <input id="searchInput" type="search" placeholder="Buscar producto…" autocomplete="off" aria-label="Buscar producto" aria-keyshortcuts="/"
+              class="w-full h-10 bg-slate-900 text-slate-100 pl-8 pr-3 lg:pr-9 rounded-xl border border-slate-800 focus:outline-none focus:ring-2 focus:ring-purple-500 text-sm placeholder:text-slate-500">
+            <kbd class="kbd hidden lg:flex absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" aria-hidden="true">/</kbd>
+          </div>
+          <select id="sortSelect" aria-label="Ordenar productos" class="flex-1 sm:flex-none h-10 bg-slate-900 text-slate-200 px-3 rounded-xl border border-slate-800 focus:outline-none focus:ring-2 focus:ring-purple-500 text-sm cursor-pointer">
+            <option value="relevance">Destacados</option>
+            <option value="price-asc">Precio: menor a mayor</option>
+            <option value="price-desc">Precio: mayor a menor</option>
+            <option value="name">Nombre (A–Z)</option>
+          </select>
+          <button type="button" data-action="reload-catalog" class="h-10 w-10 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 hover:text-white transition cursor-pointer" aria-label="Actualizar catálogo" title="Actualizar catálogo">
+            <i id="reloadIcon" class="fa-solid fa-rotate-right" aria-hidden="true"></i>
           </button>
-          
-          <!-- BOTÓN ACTUALIZAR CATÁLOGO -->
-          <button type="button" id="btnReloadCatalog" data-action="reload-catalog" class="text-xs text-slate-300 hover:text-white flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-800 transition cursor-pointer">
-            <i class="fa-solid fa-rotate-right"></i>
-            <span>Actualizar</span>
+          <button type="button" id="btnOpenNewProduct" data-action="open-new-product" hidden class="shrink-0 h-10 px-3.5 rounded-xl text-sm font-bold text-white flex items-center gap-2 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 active:scale-95 shadow-md shadow-purple-600/25 transition cursor-pointer disabled:from-slate-800 disabled:to-slate-800 disabled:text-slate-500 disabled:shadow-none disabled:cursor-not-allowed disabled:active:scale-100">
+            <i class="fa-solid fa-plus" aria-hidden="true"></i>
+            <span>Nuevo producto</span>
           </button>
         </div>
       </div>
 
-      <!-- GRID DE TARJETAS DE PRODUCTOS -->
-      <div id="productsGrid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3 gap-6">
-        <!-- Tarjetas dinámicas inyectadas por app.js -->
-      </div>
+      <!-- Filtro por categoría (se genera desde el catálogo) -->
+      <div id="categoryFilters" class="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1 no-scrollbar" role="group" aria-label="Filtrar por categoría" hidden></div>
+
+      <div id="productsGrid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5" aria-live="polite" aria-busy="true"></div>
     </section>
 
+    <!-- RESUMEN DEL CARRITO (solo escritorio ancho) -->
+    <aside class="hidden xl:block sticky top-24" aria-labelledby="miniCartTitle">
+      <div class="rounded-3xl border border-slate-800 bg-slate-900/70 overflow-hidden shadow-xl shadow-black/30">
+        <div class="px-5 py-4 border-b border-slate-800 flex items-center justify-between">
+          <h2 id="miniCartTitle" class="font-extrabold text-white flex items-center gap-2.5">
+            <span class="w-8 h-8 rounded-lg bg-purple-500/20 text-purple-300 flex items-center justify-center text-sm"><i class="fa-solid fa-cart-shopping" aria-hidden="true"></i></span>
+            Tu carrito
+          </h2>
+          <span id="miniCartCount" class="text-xs font-semibold text-slate-400"></span>
+        </div>
+        <div id="miniCartBody" class="p-4 space-y-2 max-h-[min(22rem,calc(100vh-24rem))] overflow-y-auto" aria-live="polite"></div>
+        <div class="px-5 py-4 border-t border-slate-800 bg-slate-950/60 space-y-3">
+          <div class="flex justify-between text-xs text-slate-400"><span>Ahorro Black Friday</span><span id="miniCartSavings" class="text-emerald-400 font-semibold tabular-nums">−$0</span></div>
+          <div class="flex justify-between items-baseline"><span class="text-sm font-bold text-white">Total</span><span id="miniCartTotal" class="text-2xl font-black text-purple-300 tabular-nums">$0</span></div>
+          <button type="button" id="btnMiniCheckout" data-action="open-checkout" class="btn-primary"><i class="fa-solid fa-lock" aria-hidden="true"></i> Ir a pagar</button>
+          <button type="button" data-action="open-cart" class="w-full text-xs font-semibold text-slate-400 hover:text-purple-300 transition cursor-pointer">Ver carrito completo <i class="fa-solid fa-arrow-right ml-1" aria-hidden="true"></i></button>
+        </div>
+      </div>
+      <p class="text-[11px] text-slate-500 mt-3 px-2 flex items-center gap-1.5"><i class="fa-solid fa-database text-indigo-400" aria-hidden="true"></i> Guardado en Redis · <span id="miniCartOwner" class="font-mono text-slate-400">usuario_1</span></p>
+    </aside>
+    </div>
   </main>
 
-  <!-- SLIDE-OVER DRAWER DEL CARRITO -->
-  <div id="cartDrawer" class="fixed inset-0 z-50 overflow-hidden pointer-events-none transition-all duration-300 opacity-0">
-    <div id="cartBackdrop" data-action="close-cart" class="absolute inset-0 bg-slate-950/80 backdrop-blur-sm transition-opacity cursor-pointer"></div>
-    <div class="absolute inset-y-0 right-0 max-w-full flex pl-10">
-      <div id="cartPanel" class="w-screen max-w-md bg-slate-900 border-l border-slate-800 shadow-2xl flex flex-col pointer-events-auto transform translate-x-full transition-transform duration-300 ease-in-out">
-        
-        <!-- ENCABEZADO DEL CARRITO -->
-        <div class="p-5 border-b border-slate-800 flex items-center justify-between bg-slate-900/90">
-          <div class="flex items-center gap-3">
-            <div class="w-9 h-9 rounded-xl bg-purple-500/20 text-purple-400 flex items-center justify-center font-bold text-lg">
-              <i class="fa-solid fa-cart-shopping"></i>
-            </div>
-            <div>
-              <h3 class="font-bold text-base text-white">Carrito Persistente</h3>
-              <p id="cartOwnerLabel" class="text-xs text-slate-400">Usuario: <span class="text-purple-300 font-mono font-bold">usuario_1</span></p>
-            </div>
+  <footer class="border-t border-slate-900 mt-12 bg-slate-950">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 lg:py-10 grid gap-8 md:grid-cols-[1.4fr_1fr_1fr] text-xs text-slate-500">
+      <div class="space-y-3 text-center md:text-left">
+        <div class="flex items-center justify-center md:justify-start gap-2.5">
+          <span class="w-8 h-8 rounded-lg bg-gradient-to-tr from-purple-600 to-indigo-500 flex items-center justify-center text-white text-sm"><i class="fa-solid fa-bolt" aria-hidden="true"></i></span>
+          <span class="text-base font-extrabold text-white">ShopHero</span>
+        </div>
+        <p class="max-w-sm mx-auto md:mx-0 leading-relaxed">Tienda de venta flash sobre microservicios cloud-native. Proyecto de Arquitectura de Software · UNISANGIL.</p>
+      </div>
+      <div class="hidden md:block space-y-3">
+        <p class="font-bold text-slate-300 uppercase tracking-wider text-[11px]">Arquitectura</p>
+        <ul class="space-y-1.5">
+          <li>API Gateway NGINX con rate limiting</li>
+          <li>Carrito persistente en Redis</li>
+          <li>Autenticación JWT con scopes</li>
+          <li>Circuit breaker (Opossum) · OpenTelemetry</li>
+        </ul>
+      </div>
+      <div class="space-y-3 text-center md:text-left">
+        <p class="hidden md:block font-bold text-slate-300 uppercase tracking-wider text-[11px]">Herramientas</p>
+        <div class="flex md:flex-col flex-wrap justify-center gap-x-4 gap-y-1.5">
+          <button type="button" data-action="open-monitor" class="text-slate-400 hover:text-purple-300 transition cursor-pointer text-left"><i class="fa-solid fa-network-wired mr-1.5" aria-hidden="true"></i>Estado de la arquitectura</button>
+          <a href="/grafana/" target="_blank" rel="noopener noreferrer" class="text-slate-400 hover:text-orange-300 transition"><i class="fa-solid fa-chart-line mr-1.5" aria-hidden="true"></i>Grafana</a>
+          <button type="button" data-action="go-top" class="text-slate-400 hover:text-white transition cursor-pointer text-left"><i class="fa-solid fa-arrow-up mr-1.5" aria-hidden="true"></i>Volver arriba</button>
+        </div>
+      </div>
+    </div>
+  </footer>
+
+  <!-- ============ CARRITO (DRAWER) ============ -->
+  <div id="cartDrawer" class="overlay" data-overlay hidden>
+    <div class="overlay-backdrop" data-action="close-overlay"></div>
+    <aside class="drawer-panel" role="dialog" aria-modal="true" aria-labelledby="cartTitle">
+      <div class="p-5 border-b border-slate-800 flex items-center justify-between">
+        <div class="flex items-center gap-3">
+          <div class="w-9 h-9 rounded-xl bg-purple-500/20 text-purple-300 flex items-center justify-center"><i class="fa-solid fa-cart-shopping" aria-hidden="true"></i></div>
+          <div>
+            <h3 id="cartTitle" class="font-bold text-base text-white">Tu carrito</h3>
+            <p class="text-xs text-slate-400">Sesión: <span id="cartOwnerLabel" class="text-purple-300 font-mono font-bold">usuario_1</span></p>
           </div>
-          <button type="button" id="btnCloseCart" data-action="close-cart" class="text-slate-400 hover:text-white p-2 rounded-xl hover:bg-slate-800 transition cursor-pointer">
-            <i class="fa-solid fa-xmark text-lg"></i>
+        </div>
+        <button type="button" data-action="close-overlay" class="icon-btn" aria-label="Cerrar carrito"><i class="fa-solid fa-xmark text-lg" aria-hidden="true"></i></button>
+      </div>
+
+      <div class="bg-indigo-950/40 px-5 py-2.5 border-b border-indigo-900/30 flex items-center gap-2.5 text-[11px] text-indigo-200">
+        <i class="fa-solid fa-database text-indigo-400" aria-hidden="true"></i>
+        <span>Guardado en Redis como <code class="code">cart:&lt;usuarioId&gt;</code> · expira a los 30 días sin actividad</span>
+      </div>
+
+      <div id="cartItemsList" class="flex-1 overflow-y-auto p-5 space-y-3" aria-live="polite"></div>
+
+      <div class="p-5 border-t border-slate-800 bg-slate-950/80 space-y-4">
+        <dl class="space-y-2 text-xs text-slate-400">
+          <div class="flex justify-between"><dt>Precio regular</dt><dd id="cartRegular" class="text-slate-500 line-through">$0</dd></div>
+          <div class="flex justify-between"><dt>Ahorro Black Friday</dt><dd id="cartSavings" class="text-emerald-400 font-semibold">−$0</dd></div>
+          <div class="flex justify-between items-baseline pt-2.5 border-t border-slate-800 text-white">
+            <dt class="font-bold text-sm">Total</dt><dd id="cartTotal" class="text-purple-300 font-mono text-xl font-black">$0</dd>
+          </div>
+        </dl>
+        <div class="grid grid-cols-[auto_1fr] gap-2.5">
+          <button type="button" id="btnClearCart" data-action="clear-cart" class="btn-secondary hover:!text-rose-300 hover:!border-rose-800/60" aria-label="Vaciar carrito" title="Vaciar carrito">
+            <i class="fa-solid fa-trash-can" aria-hidden="true"></i>
+          </button>
+          <button type="button" id="btnCheckout" data-action="open-checkout" class="btn-primary">
+            <i class="fa-solid fa-lock" aria-hidden="true"></i> <span>Ir a pagar</span>
           </button>
         </div>
+      </div>
+    </aside>
+  </div>
 
-        <!-- BADGE DE PERSISTENCIA EN REDIS -->
-        <div class="bg-indigo-950/40 px-5 py-2.5 border-b border-indigo-900/30 flex items-center gap-2.5 text-xs text-indigo-300">
-          <i class="fa-solid fa-database text-indigo-400"></i>
-          <span>Persistido en <strong>Redis</strong> con hash <code class="font-mono text-[11px] bg-slate-950 px-1.5 py-0.5 rounded border border-indigo-900/50">cart:&lt;usuarioId&gt;</code> (TTL 30d)</span>
+  <!-- ============ CHECKOUT ============ -->
+  <div id="checkoutModal" class="overlay overlay--center" data-overlay hidden>
+    <div class="overlay-backdrop" data-action="close-overlay"></div>
+    <div class="modal-panel max-w-lg" role="dialog" aria-modal="true" aria-labelledby="checkoutTitle">
+      <div class="modal-header">
+        <h3 id="checkoutTitle" class="modal-title"><i class="fa-solid fa-receipt text-purple-400" aria-hidden="true"></i> Resumen del pedido</h3>
+        <button type="button" data-action="close-overlay" class="icon-btn" aria-label="Cerrar"><i class="fa-solid fa-xmark text-lg" aria-hidden="true"></i></button>
+      </div>
+      <div id="checkoutBody" class="space-y-4"></div>
+    </div>
+  </div>
+
+  <!-- ============ NUEVO PRODUCTO ============ -->
+  <div id="newProductModal" class="overlay overlay--center" data-overlay hidden>
+    <div class="overlay-backdrop" data-action="close-overlay"></div>
+    <form id="newProductForm" class="modal-panel max-w-md" role="dialog" aria-modal="true" aria-labelledby="newProductTitle" novalidate>
+      <div class="modal-header">
+        <h3 id="newProductTitle" class="modal-title"><i class="fa-solid fa-box-open text-purple-400" aria-hidden="true"></i> Nuevo producto</h3>
+        <button type="button" data-action="close-overlay" class="icon-btn" aria-label="Cerrar"><i class="fa-solid fa-xmark text-lg" aria-hidden="true"></i></button>
+      </div>
+      <p class="text-xs text-slate-400">Se envía a <code class="code">POST /api/productos</code> con el token de la sesión actual. Requiere el scope <code class="code">products:write</code>.</p>
+      <div class="space-y-4">
+        <div>
+          <label for="newProdName" class="field-label">Nombre</label>
+          <input type="text" id="newProdName" name="nombre" required maxlength="80" placeholder="Ej: Audífonos Gamer Pro 7.1" autocomplete="off" class="field">
         </div>
-
-        <!-- LISTA DE ARTÍCULOS EN EL CARRITO -->
-        <div id="cartItemsList" class="flex-1 overflow-y-auto p-5 space-y-3.5">
-          <div class="text-center py-16 text-slate-500 text-sm">Cargando carrito...</div>
+        <div>
+          <label for="newProdPrice" class="field-label">Precio de oferta (COP)</label>
+          <input type="number" id="newProdPrice" name="precio" required min="1000" step="1000" placeholder="Ej: 180000" inputmode="numeric" class="field font-mono">
+          <p id="newProdPricePreview" class="text-[11px] text-slate-500 mt-1.5 min-h-4"></p>
         </div>
+        <p id="newProductError" class="hidden text-xs text-rose-300 bg-rose-500/10 border border-rose-500/30 rounded-xl p-3" role="alert"></p>
+      </div>
+      <div class="flex justify-end gap-2.5 pt-1">
+        <button type="button" data-action="close-overlay" class="btn-secondary">Cancelar</button>
+        <button type="submit" id="btnSubmitNewProduct" class="btn-primary !w-auto px-5"><i class="fa-solid fa-check" aria-hidden="true"></i> <span>Crear producto</span></button>
+      </div>
+    </form>
+  </div>
 
-        <!-- TOTALES Y ACCIONES DEL CARRITO -->
-        <div class="p-5 border-t border-slate-800 bg-slate-950/80 space-y-4">
-          <div class="space-y-2 text-xs text-slate-400">
-            <div class="flex justify-between items-center">
-              <span>Subtotal estimado</span>
-              <span id="cartSubtotal" class="font-semibold text-slate-200 text-sm">$0 COP</span>
-            </div>
-            <div class="flex justify-between items-center">
-              <span>Descuento Black Friday (15%)</span>
-              <span id="cartDiscount" class="text-emerald-400 font-semibold">-$0 COP</span>
-            </div>
-            <div class="flex justify-between items-center font-bold text-base text-white pt-2.5 border-t border-slate-800">
-              <span>Total Final</span>
-              <span id="cartTotal" class="text-purple-400 font-mono text-lg font-black">$0 COP</span>
-            </div>
+  <!-- ============ ARQUITECTURA / MONITOR ============ -->
+  <div id="monitorModal" class="overlay overlay--center" data-overlay hidden>
+    <div class="overlay-backdrop" data-action="close-overlay"></div>
+    <div class="modal-panel max-w-3xl" role="dialog" aria-modal="true" aria-labelledby="monitorTitle">
+      <div class="modal-header">
+        <h3 id="monitorTitle" class="modal-title"><i class="fa-solid fa-network-wired text-purple-400" aria-hidden="true"></i> Arquitectura y resiliencia</h3>
+        <button type="button" data-action="close-overlay" class="icon-btn" aria-label="Cerrar"><i class="fa-solid fa-xmark text-lg" aria-hidden="true"></i></button>
+      </div>
+
+      <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+        <div class="monitor-card">
+          <div class="text-slate-400 font-semibold"><i class="fa-solid fa-server mr-1.5 text-slate-500" aria-hidden="true"></i>API Gateway NGINX</div>
+          <div id="gwStatus" class="monitor-status">—</div>
+          <div class="text-[11px] text-slate-500">Límite 100 r/s · ráfaga 50</div>
+        </div>
+        <div class="monitor-card">
+          <div class="text-slate-400 font-semibold"><i class="fa-solid fa-database mr-1.5 text-slate-500" aria-hidden="true"></i>Carrito + Redis</div>
+          <div id="redisStatus" class="monitor-status">—</div>
+          <div class="text-[11px] text-slate-500">AOF · TTL 30 días · clave vía Vault</div>
+        </div>
+        <div class="monitor-card">
+          <div class="text-slate-400 font-semibold"><i class="fa-solid fa-circle-nodes mr-1.5 text-slate-500" aria-hidden="true"></i>Circuit breaker (Opossum)</div>
+          <div id="cbStatus" class="monitor-status">—</div>
+          <div class="text-[11px] text-slate-500">Timeout 500 ms · caché 5 min</div>
+        </div>
+      </div>
+
+      <div class="rounded-2xl border border-slate-800 bg-slate-950/60 p-4 space-y-3">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h4 class="text-sm font-bold text-white">Prueba de rate limiting</h4>
+            <p class="text-[11px] text-slate-400">Dispara peticiones simultáneas a <code class="code">GET /api/carritos/:usuarioId</code>. NGINX responde 429 al superar el límite.</p>
           </div>
-
-          <div class="grid grid-cols-2 gap-2.5 pt-1">
-            <button type="button" id="btnClearCart" data-action="clear-cart" class="px-3 py-2.5 rounded-xl bg-slate-800 hover:bg-rose-950/40 text-slate-300 hover:text-rose-300 text-xs font-bold transition flex items-center justify-center gap-2 border border-slate-700 hover:border-rose-800/50 cursor-pointer">
-              <i class="fa-solid fa-trash-can"></i>
-              <span>Vaciar Carrito</span>
+          <div class="flex items-center gap-2">
+            <label for="burstSize" class="sr-only">Número de peticiones</label>
+            <select id="burstSize" class="h-9 bg-slate-900 text-slate-200 px-2 rounded-lg border border-slate-700 text-xs">
+              <option value="60">60</option>
+              <option value="150" selected>150</option>
+              <option value="300">300</option>
+            </select>
+            <button type="button" id="btnRateLimitTest" data-action="test-rate-limit" class="h-9 px-3.5 rounded-lg bg-purple-600/20 hover:bg-purple-600/30 text-purple-200 border border-purple-500/40 text-xs font-bold flex items-center gap-2 transition cursor-pointer disabled:opacity-50 disabled:cursor-wait">
+              <i class="fa-solid fa-gauge-high" aria-hidden="true"></i> Disparar ráfaga
             </button>
-            <button type="button" id="btnCheckout" data-action="checkout" class="px-3 py-2.5 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white text-xs font-black transition flex items-center justify-center gap-2 shadow-lg shadow-purple-600/30 cursor-pointer">
-              <i class="fa-solid fa-check"></i>
-              <span>Proceder al Pago</span>
-            </button>
           </div>
         </div>
+        <div id="rateLimitResult" class="text-xs text-slate-400" aria-live="polite"></div>
+      </div>
 
+      <div class="flex flex-wrap justify-between items-center gap-3 text-xs">
+        <p class="text-slate-500">Métricas y trazas en Grafana (Prometheus + OpenTelemetry).</p>
+        <a href="/grafana/" target="_blank" rel="noopener noreferrer" class="btn-secondary !h-9"><i class="fa-solid fa-chart-line text-orange-400" aria-hidden="true"></i> Abrir Grafana</a>
       </div>
     </div>
   </div>
 
-  <!-- MODAL: INGRESAR NUEVO PRODUCTO AL CATÁLOGO (TOTALMENTE ASÍNCRONO, SIN <FORM>) -->
-  <div id="newProductModal" class="fixed inset-0 z-50 overflow-hidden pointer-events-none transition-all duration-300 opacity-0 flex items-center justify-center p-4">
-    <div id="newProductBackdrop" data-action="close-new-product" class="absolute inset-0 bg-slate-950/80 backdrop-blur-sm cursor-pointer"></div>
-    <div class="relative bg-slate-900 border border-slate-800 rounded-3xl shadow-2xl max-w-md w-full p-6 space-y-4 pointer-events-auto">
-      
-      <!-- ENCABEZADO MODAL -->
-      <div class="flex items-center justify-between border-b border-slate-800 pb-3.5">
-        <h3 class="font-bold text-white text-base flex items-center gap-2.5">
-          <i class="fa-solid fa-box-open text-purple-400"></i>
-          <span>Ingresar Nuevo Producto</span>
-        </h3>
-        <button type="button" id="btnCloseNewProductModal" data-action="close-new-product" class="text-slate-400 hover:text-white p-1.5 rounded-lg hover:bg-slate-800 transition cursor-pointer">
-          <i class="fa-solid fa-xmark text-lg"></i>
-        </button>
+  <!-- ============ TOKEN JWT ============ -->
+  <div id="tokenModal" class="overlay overlay--center" data-overlay hidden>
+    <div class="overlay-backdrop" data-action="close-overlay"></div>
+    <div class="modal-panel max-w-lg" role="dialog" aria-modal="true" aria-labelledby="tokenTitle">
+      <div class="modal-header">
+        <h3 id="tokenTitle" class="modal-title"><i class="fa-solid fa-key text-purple-400" aria-hidden="true"></i> Token JWT de la sesión</h3>
+        <button type="button" data-action="close-overlay" class="icon-btn" aria-label="Cerrar"><i class="fa-solid fa-xmark text-lg" aria-hidden="true"></i></button>
       </div>
-
-      <!-- CAMPOS DEL PRODUCTO (CONTENEDOR DIV PARA EVITAR CUALQUIER RECARGA NATIVA) -->
-      <div id="newProductFields" class="space-y-4 text-xs">
-        <div>
-          <label class="block text-slate-300 mb-1.5 font-semibold">Nombre del Producto:</label>
-          <input type="text" id="newProdName" placeholder="Ej: Audífonos Gamer Pro 7.1" autocomplete="off" class="w-full bg-slate-950 text-slate-200 p-3 rounded-xl border border-slate-800 focus:outline-none focus:ring-2 focus:ring-purple-500 text-xs">
-        </div>
-        <div>
-          <label class="block text-slate-300 mb-1.5 font-semibold">Precio en Pesos Colombianos (COP):</label>
-          <input type="number" id="newProdPrice" min="1000" step="1000" placeholder="Ej: 180000" autocomplete="off" class="w-full bg-slate-950 text-slate-200 p-3 rounded-xl border border-slate-800 focus:outline-none focus:ring-2 focus:ring-purple-500 text-xs font-mono">
-        </div>
-        <div>
-          <label class="block text-slate-300 mb-1.5 font-semibold">Descripción breve (opcional):</label>
-          <input type="text" id="newProdDesc" placeholder="Ej: Sonido 7.1 envolvente, micrófono con cancelación de ruido." autocomplete="off" class="w-full bg-slate-950 text-slate-200 p-3 rounded-xl border border-slate-800 focus:outline-none focus:ring-2 focus:ring-purple-500 text-xs">
-        </div>
-
-        <div class="pt-2 flex justify-end gap-2.5">
-          <button type="button" id="btnCancelNewProduct" data-action="close-new-product" class="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold transition cursor-pointer">
-            Cancelar
-          </button>
-          <button type="button" id="btnSubmitNewProduct" data-action="submit-new-product" class="px-5 py-2.5 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 active:scale-95 text-white font-bold transition flex items-center gap-2 shadow-lg shadow-purple-600/30 cursor-pointer">
-            <i class="fa-solid fa-check"></i>
-            <span>Ingresar Producto</span>
-          </button>
-        </div>
+      <div id="tokenClaims" class="space-y-2 text-xs"></div>
+      <div>
+        <label for="jwtTextarea" class="field-label">Token Bearer</label>
+        <textarea id="jwtTextarea" rows="4" spellcheck="false" class="field font-mono !text-[11px] break-all"></textarea>
+        <p class="text-[11px] text-slate-500 mt-1.5">Puedes pegar otro token para probar scopes o el bloqueo BOLA. Se guarda solo en este navegador.</p>
       </div>
-
-    </div>
-  </div>
-
-  <!-- MODAL: PANEL DE ARQUITECTURA & MONITOR RESILIENCIA -->
-  <div id="monitorModal" class="fixed inset-0 z-50 overflow-hidden pointer-events-none transition-all duration-300 opacity-0">
-    <div id="monitorBackdrop" data-action="close-monitor" class="absolute inset-0 bg-slate-950/80 backdrop-blur-sm cursor-pointer"></div>
-    <div class="absolute inset-x-0 bottom-0 max-w-4xl mx-auto p-4 pointer-events-auto">
-      <div class="bg-slate-900 border border-slate-800 rounded-3xl shadow-2xl p-6 space-y-5">
-        
-        <div class="flex items-center justify-between border-b border-slate-800 pb-3">
-          <div class="flex items-center gap-2.5">
-            <i class="fa-solid fa-network-wired text-purple-400 text-lg"></i>
-            <h3 class="font-bold text-white text-base">Panel de Arquitectura & Resiliencia Cloud-Native</h3>
-          </div>
-          <button type="button" id="btnCloseMonitor" data-action="close-monitor" class="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition cursor-pointer">
-            <i class="fa-solid fa-xmark text-lg"></i>
-          </button>
+      <div class="flex flex-wrap justify-between gap-2">
+        <div class="flex gap-2">
+          <button type="button" data-action="copy-token" class="btn-secondary !h-9"><i class="fa-regular fa-copy" aria-hidden="true"></i> Copiar</button>
+          <button type="button" id="btnResetToken" data-action="reset-token" class="btn-secondary !h-9"><i class="fa-solid fa-rotate-left" aria-hidden="true"></i> Restablecer</button>
         </div>
-
-        <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs">
-          <!-- GATEWAY STATUS -->
-          <div class="bg-slate-950 p-4 rounded-2xl border border-slate-800 space-y-1.5">
-            <div class="text-slate-400 font-semibold">NGINX API Gateway (:8080)</div>
-            <div id="gwStatusPill" class="flex items-center gap-2 text-emerald-400 font-bold">
-              <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-              <span>Conectado (200 OK)</span>
-            </div>
-            <div class="text-[11px] text-slate-500">Rate Limit: 100 r/s, burst 50</div>
-          </div>
-
-          <!-- REDIS STATUS -->
-          <div class="bg-slate-950 p-4 rounded-2xl border border-slate-800 space-y-1.5">
-            <div class="text-slate-400 font-semibold">Persistencia Redis</div>
-            <div class="flex items-center gap-2 text-emerald-400 font-bold">
-              <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
-              <span>AOF Activo (TTL 30d)</span>
-            </div>
-            <div class="text-[11px] text-slate-500">Autenticado vía Vault</div>
-          </div>
-
-          <!-- CIRCUIT BREAKER -->
-          <div class="bg-slate-950 p-4 rounded-2xl border border-slate-800 space-y-1.5">
-            <div class="text-slate-400 font-semibold">Circuit Breaker Opossum</div>
-            <div id="cbStatusPill" class="flex items-center gap-2 text-purple-400 font-bold">
-              <span class="w-2 h-2 rounded-full bg-purple-500"></span>
-              <span>Cerrado (Normal)</span>
-            </div>
-            <div class="text-[11px] text-slate-500">Timeout: 500ms, Fallback: 5m</div>
-          </div>
-        </div>
-
-        <!-- SIMULACIONES Y OBSERVABILIDAD -->
-        <div class="flex flex-wrap items-center justify-between gap-3 pt-2">
-          <div class="flex items-center gap-2.5">
-            <button type="button" id="btnRateLimitTest" data-action="test-rate-limit" class="px-4 py-2.5 rounded-xl bg-purple-600/20 hover:bg-purple-600/30 text-purple-300 border border-purple-500/30 text-xs font-bold flex items-center gap-2 transition cursor-pointer">
-              <i class="fa-solid fa-gauge-high"></i>
-              <span>Probar Ráfaga DoS (50 requests)</span>
-            </button>
-            <a href="/grafana/" target="_blank" rel="noopener noreferrer" class="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-semibold flex items-center gap-2 transition cursor-pointer">
-              <i class="fa-solid fa-chart-line text-orange-400"></i>
-              <span>Ver Grafana (Nueva Pestaña)</span>
-            </a>
-          </div>
-          <div id="rateLimitResult" class="text-xs text-slate-400"></div>
-        </div>
-
+        <button type="button" data-action="save-token" class="btn-primary !w-auto !h-9 px-4">Aplicar token</button>
       </div>
     </div>
   </div>
 
-  <!-- MODAL: DETALLE DEL TOKEN JWT -->
-  <div id="tokenModal" class="fixed inset-0 z-50 overflow-hidden pointer-events-none transition-all duration-300 opacity-0 flex items-center justify-center p-4">
-    <div id="tokenBackdrop" data-action="close-token-modal" class="absolute inset-0 bg-slate-950/80 backdrop-blur-sm cursor-pointer"></div>
-    <div class="relative bg-slate-900 border border-slate-800 rounded-3xl shadow-2xl max-w-lg w-full p-6 space-y-4 pointer-events-auto">
-      
-      <div class="flex items-center justify-between border-b border-slate-800 pb-3">
-        <h3 class="font-bold text-white text-base flex items-center gap-2.5">
-          <i class="fa-solid fa-key text-purple-400"></i>
-          <span>Detalle del Token JWT Activo</span>
-        </h3>
-        <button type="button" id="btnCloseTokenModal" data-action="close-token-modal" class="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition cursor-pointer">
-          <i class="fa-solid fa-xmark text-lg"></i>
-        </button>
+  <!-- ============ CONFIRMACIÓN ============ -->
+  <div id="confirmModal" class="overlay overlay--center" data-overlay hidden>
+    <div class="overlay-backdrop" data-action="confirm-cancel"></div>
+    <div class="modal-panel max-w-sm" role="alertdialog" aria-modal="true" aria-labelledby="confirmTitle" aria-describedby="confirmText">
+      <h3 id="confirmTitle" class="modal-title"></h3>
+      <p id="confirmText" class="text-sm text-slate-300"></p>
+      <div class="flex justify-end gap-2.5">
+        <button type="button" data-action="confirm-cancel" class="btn-secondary">Cancelar</button>
+        <button type="button" id="confirmOk" data-action="confirm-ok" class="btn-danger">Confirmar</button>
       </div>
-
-      <div class="space-y-3.5 text-xs">
-        <div>
-          <label class="block text-slate-400 mb-1.5 font-semibold">Token Bearer de la sesión actual:</label>
-          <textarea id="jwtTextarea" rows="4" class="w-full bg-slate-950 text-slate-300 font-mono text-[11px] p-3 rounded-xl border border-slate-800 focus:outline-none focus:ring-2 focus:ring-purple-500"></textarea>
-        </div>
-        <div class="flex justify-between items-center pt-2">
-          <button type="button" id="btnCopyToken" data-action="copy-token" class="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold border border-slate-700 transition cursor-pointer">
-            <i class="fa-regular fa-copy mr-1.5"></i> Copiar Token
-          </button>
-          <button type="button" id="btnSaveCustomToken" data-action="save-token" class="px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold transition cursor-pointer">
-            Aplicar Token Personalizado
-          </button>
-        </div>
-      </div>
-
     </div>
   </div>
 
-  <!-- CONTENEDOR DE NOTIFICACIONES TOAST -->
-  <div id="toastContainer" class="fixed bottom-5 right-5 z-50 space-y-2 pointer-events-none"></div>
+  <div id="toastContainer" class="fixed bottom-4 left-4 right-4 sm:right-auto z-[70] flex flex-col items-start gap-2 pointer-events-none" aria-live="polite" aria-atomic="false"></div>
 
-  <!-- LÓGICA PRINCIPAL DEL CLIENTE -->
   <script src="app.js"></script>
 </body>
 </html>

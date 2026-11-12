@@ -1,16 +1,21 @@
 /**
- * Servidor ligero de desarrollo y previsualización para ShopHero Frontend
- * 
- * Permite previsualizar la interfaz del cliente en http://localhost:5000
- * Si Docker/Gateway (:8080) está corriendo, redirige las peticiones /api a él.
- * Si Gateway está detenido o falla, responde inmediatamente con datos mock offline (sin trabas ni cuelgues).
+ * Servidor ligero de desarrollo y previsualización para el frontend de ShopHero.
+ *
+ *   node scripts/serve-frontend.js      →  http://localhost:5000
+ *
+ * - Sirve los archivos estáticos de frontend/.
+ * - Reenvía /health y /api/* al API Gateway (http://localhost:8080 por defecto).
+ * - Si el Gateway no responde, contesta con datos simulados en memoria ("modo demo")
+ *   y marca cada respuesta con la cabecera `X-ShopHero-Mock: 1` para que la interfaz
+ *   lo indique. El modo demo simula scopes, rol admin y dueño del carrito leyendo los
+ *   claims del JWT, pero NO verifica firma ni expiración.
  */
 
 const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const PORT = process.env.FRONTEND_PORT || 5000;
+const PORT = Number(process.env.FRONTEND_PORT) || 5000;
 const GATEWAY_URL = process.env.GATEWAY_URL || 'http://localhost:8080';
 const FRONTEND_DIR = path.join(__dirname, '..', 'frontend');
 
@@ -22,180 +27,205 @@ const MIME_TYPES = {
   '.png': 'image/png',
   '.jpg': 'image/jpeg',
   '.svg': 'image/svg+xml',
+  '.woff2': 'font/woff2',
+  '.ico': 'image/x-icon',
 };
 
-// Productos y carritos en memoria para previsualización offline sin bloqueos
+// Cabeceras que no deben copiarse al reenviar una respuesta ya decodificada por fetch.
+const HOP_BY_HOP = new Set(['content-encoding', 'content-length', 'transfer-encoding', 'connection', 'keep-alive']);
+
+// ---------------------------------------------------------------------------
+// Datos simulados (solo en memoria)
+// ---------------------------------------------------------------------------
 const mockProducts = [
-  { id: 1, nombre: 'Teclado Mecánico RGB', precio: 120000, desc: 'Switches mecánicos Red, retroiluminación RGB por tecla.' },
-  { id: 2, nombre: 'Mouse Gamer Inalámbrico', precio: 60000, desc: 'Sensor óptico 16.000 DPI, latencia ultra-baja 1ms.' },
-  { id: 3, nombre: 'Audífonos Gamer Pro 7.1', precio: 180000, desc: 'Sonido envolvente 7.1 Surround, micrófono con cancelación de ruido.' },
+  { id: 1, nombre: 'Teclado Mecánico RGB', precio: 120000 },
+  { id: 2, nombre: 'Mouse Gamer Inalámbrico', precio: 60000 },
+  { id: 3, nombre: 'Audífonos Gamer Pro 7.1', precio: 180000 },
+  { id: 4, nombre: 'Monitor 27" 165 Hz', precio: 890000 },
+  { id: 5, nombre: 'Control Inalámbrico', precio: 210000 },
 ];
 
-const mockCart = {
-  usuario_1: [
-    { productoId: '1', cantidad: 2 },
-    { productoId: '2', cantidad: 1 },
-  ],
-  usuario_2: [],
-  admin: [],
+const mockCarts = {
+  usuario_1: new Map([['1', 1]]),
+  usuario_2: new Map(),
+  admin: new Map(),
 };
 
-const server = http.createServer(async (req, res) => {
-  // Manejo de peticiones API
-  if (req.url.startsWith('/api/')) {
-    let bodyData = null;
-    if (req.method === 'POST' || req.method === 'PUT' || req.method === 'PATCH') {
-      try {
-        bodyData = await readBody(req);
-      } catch (err) {
-        bodyData = Buffer.from('{}');
-      }
-    }
+const ID_PATTERN = /^[a-zA-Z0-9_-]{1,100}$/;
 
-    // Intentar consultar al Gateway NGINX con timeout corto (1.5s)
+// ---------------------------------------------------------------------------
+// Servidor
+// ---------------------------------------------------------------------------
+const server = http.createServer(async (req, res) => {
+  const pathname = req.url.split('?')[0];
+
+  if (pathname === '/health' || pathname.startsWith('/api/')) {
+    const body = ['POST', 'PUT', 'PATCH'].includes(req.method) ? await readBody(req).catch(() => Buffer.alloc(0)) : undefined;
+
     try {
-      const targetUrl = `${GATEWAY_URL}${req.url}`;
       const headers = { ...req.headers };
       delete headers.host;
-
-      const proxyRes = await fetch(targetUrl, {
+      const upstream = await fetch(`${GATEWAY_URL}${req.url}`, {
         method: req.method,
         headers,
-        body: bodyData,
+        body,
         signal: AbortSignal.timeout(1500),
       });
-
-      res.statusCode = proxyRes.status;
-      proxyRes.headers.forEach((val, key) => res.setHeader(key, val));
-      const resBuffer = await proxyRes.arrayBuffer();
-      res.end(Buffer.from(resBuffer));
-      return;
+      res.statusCode = upstream.status;
+      upstream.headers.forEach((value, key) => {
+        if (!HOP_BY_HOP.has(key)) res.setHeader(key, value);
+      });
+      res.end(Buffer.from(await upstream.arrayBuffer()));
     } catch {
-      // Modo Mock Offline inmediato si el Gateway no responde o se demora
-      handleMockApi(req, res, bodyData);
-      return;
+      handleMockApi(req, res, pathname, body);
     }
-  }
-
-  // Servir archivos estáticos de frontend/
-  let reqPath = req.url.split('?')[0];
-  if (reqPath === '/' || reqPath === '') reqPath = '/index.html';
-
-  const filePath = path.join(FRONTEND_DIR, reqPath);
-
-  // Seguridad de rutas
-  if (!filePath.startsWith(FRONTEND_DIR)) {
-    res.statusCode = 403;
-    res.end('Acceso denegado');
     return;
   }
 
-  if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
-    const ext = path.extname(filePath).toLowerCase();
-    res.writeHead(200, { 'Content-Type': MIME_TYPES[ext] || 'application/octet-stream' });
-    fs.createReadStream(filePath).pipe(res);
-  } else {
-    // SPA fallback
-    const indexFile = path.join(FRONTEND_DIR, 'index.html');
-    if (fs.existsSync(indexFile)) {
-      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-      fs.createReadStream(indexFile).pipe(res);
-    } else {
-      res.writeHead(404, { 'Content-Type': 'text/plain' });
-      res.end('Archivo no encontrado');
-    }
-  }
+  serveStatic(pathname, res);
 });
 
-function handleMockApi(req, res, bodyData) {
-  const [pathname] = req.url.split('?');
+function serveStatic(pathname, res) {
+  let relative;
+  try {
+    relative = decodeURIComponent(pathname === '/' ? '/index.html' : pathname);
+  } catch {
+    res.writeHead(400).end('Ruta inválida');
+    return;
+  }
+  const filePath = path.join(FRONTEND_DIR, relative);
+  if (filePath !== FRONTEND_DIR && !filePath.startsWith(FRONTEND_DIR + path.sep)) {
+    res.writeHead(403).end('Acceso denegado');
+    return;
+  }
 
-  // Catálogo de Productos
-  if (pathname === '/api/productos') {
+  const target = fs.existsSync(filePath) && fs.statSync(filePath).isFile() ? filePath : path.join(FRONTEND_DIR, 'index.html');
+  const ext = path.extname(target).toLowerCase();
+  res.writeHead(200, {
+    'Content-Type': MIME_TYPES[ext] || 'application/octet-stream',
+    'Cache-Control': ext === '.json' || ext === '.html' ? 'no-store' : 'no-cache',
+  });
+  fs.createReadStream(target).pipe(res);
+}
+
+// ---------------------------------------------------------------------------
+// API simulada
+// ---------------------------------------------------------------------------
+function send(res, status, payload) {
+  const headers = { 'X-ShopHero-Mock': '1' };
+  if (payload === undefined) {
+    res.writeHead(status, headers).end();
+    return;
+  }
+  headers['Content-Type'] = 'application/json; charset=utf-8';
+  res.writeHead(status, headers).end(JSON.stringify(payload));
+}
+
+/** Lee los claims del JWT sin verificar la firma (solo para la demo). */
+function readClaims(req) {
+  const match = /^Bearer\s+(.+)$/i.exec(req.headers.authorization || '');
+  if (!match) return null;
+  try {
+    const payload = JSON.parse(Buffer.from(match[1].split('.')[1], 'base64url').toString('utf8'));
+    if (!payload.sub) return null;
+    return {
+      sub: payload.sub,
+      scopes: typeof payload.scope === 'string' ? payload.scope.split(/\s+/) : [],
+      roles: Array.isArray(payload.roles) ? payload.roles : [],
+    };
+  } catch {
+    return null;
+  }
+}
+
+const hasScope = (auth, scope) => auth.roles.includes('admin') || auth.scopes.includes(scope);
+
+function parseJson(buffer) {
+  try {
+    return JSON.parse(buffer ? buffer.toString('utf8') : '{}') || {};
+  } catch {
+    return {};
+  }
+}
+
+function handleMockApi(req, res, pathname, bodyData) {
+  if (pathname === '/health') {
+    send(res, 200, { estado: 'demo' });
+    return;
+  }
+
+  const auth = readClaims(req);
+  if (!auth) {
+    send(res, 401, { error: 'Se requiere un token Bearer válido' });
+    return;
+  }
+
+  // --- Productos ---------------------------------------------------------
+  const productMatch = /^\/api\/productos(?:\/([^/]+))?$/.exec(pathname);
+  if (productMatch) {
+    const [, id] = productMatch;
     if (req.method === 'GET') {
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify(mockProducts));
-      return;
+      if (!hasScope(auth, 'products:read')) return send(res, 403, { error: 'Permisos insuficientes' });
+      if (!id) return send(res, 200, mockProducts);
+      const product = mockProducts.find((p) => p.id === Number(id));
+      return product ? send(res, 200, product) : send(res, 404, { error: 'Producto no encontrado' });
     }
-
-    if (req.method === 'POST') {
-      let body = {};
-      try {
-        body = JSON.parse(bodyData ? bodyData.toString('utf8') : '{}');
-      } catch {}
-
-      if (!body.nombre || typeof body.precio !== 'number') {
-        res.writeHead(400, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: 'nombre (string) y precio (number) son obligatorios' }));
-        return;
+    if (req.method === 'POST' && !id) {
+      if (!hasScope(auth, 'products:write')) return send(res, 403, { error: 'Permisos insuficientes' });
+      const { nombre, precio } = parseJson(bodyData);
+      if (!nombre || typeof precio !== 'number') {
+        return send(res, 400, { error: 'nombre (string) y precio (number) son obligatorios' });
       }
-
-      const nuevo = {
-        id: mockProducts.length ? Math.max(...mockProducts.map((p) => p.id)) + 1 : 1,
-        nombre: body.nombre,
-        precio: body.precio,
-        desc: body.desc || 'Producto ingresado manualmente desde la interfaz.',
-      };
+      const nuevo = { id: Math.max(0, ...mockProducts.map((p) => p.id)) + 1, nombre, precio };
       mockProducts.push(nuevo);
-
-      res.writeHead(201, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify(nuevo));
-      return;
+      return send(res, 201, nuevo);
     }
   }
 
-  // Operaciones de Carritos
-  if (pathname.startsWith('/api/carritos/')) {
-    const parts = pathname.split('/');
-    const user = parts[3];
+  // --- Carritos ----------------------------------------------------------
+  const cartMatch = /^\/api\/carritos\/([^/]+)(?:\/productos(?:\/([^/]+))?)?$/.exec(pathname);
+  if (cartMatch) {
+    const usuarioId = decodeURIComponent(cartMatch[1]);
+    const productoId = cartMatch[2] && decodeURIComponent(cartMatch[2]);
+    const isItemsRoute = pathname.includes('/productos');
+    const needed = req.method === 'GET' ? 'cart:read' : 'cart:write';
 
-    if (req.method === 'GET') {
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({
-        usuarioId: user,
-        productos: mockCart[user] || [],
-      }));
-      return;
+    if (!hasScope(auth, needed)) return send(res, 403, { error: 'Permisos insuficientes' });
+    if (!auth.roles.includes('admin') && auth.sub !== usuarioId) {
+      return send(res, 403, { error: 'No se permite acceder al carrito de otro usuario' });
+    }
+    if (!ID_PATTERN.test(usuarioId)) return send(res, 400, { error: 'usuarioId inválido' });
+
+    const cart = mockCarts[usuarioId] || (mockCarts[usuarioId] = new Map());
+
+    if (req.method === 'GET' && !isItemsRoute) {
+      return send(res, 200, {
+        usuarioId,
+        productos: [...cart].map(([id, cantidad]) => ({ productoId: id, cantidad })),
+      });
     }
 
-    if (req.method === 'POST') {
-      let body = {};
-      try {
-        body = JSON.parse(bodyData ? bodyData.toString('utf8') : '{}');
-      } catch {}
-
-      if (!mockCart[user]) mockCart[user] = [];
-      const prodId = String(body.productoId || '1');
-      const cant = Number(body.cantidad || 1);
-
-      const existing = mockCart[user].find((p) => String(p.productoId) === prodId);
-      if (existing) {
-        existing.cantidad += cant;
-      } else {
-        mockCart[user].push({ productoId: prodId, cantidad: cant });
+    if (req.method === 'POST' && isItemsRoute && !productoId) {
+      const body = parseJson(bodyData);
+      const id = String(body.productoId || '');
+      if (!ID_PATTERN.test(id)) return send(res, 400, { error: 'usuarioId y productoId deben ser válidos' });
+      if (!Number.isInteger(body.cantidad) || body.cantidad < 1 || body.cantidad > 1000) {
+        return send(res, 400, { error: 'cantidad debe ser un entero entre 1 y 1000' });
       }
-
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ usuarioId: user, productoId: prodId, cantidad: cant }));
-      return;
+      if (!mockProducts.some((p) => String(p.id) === id)) return send(res, 404, { error: 'Producto no encontrado' });
+      cart.set(id, (cart.get(id) || 0) + body.cantidad);
+      return send(res, 200, { usuarioId, productoId: id, cantidad: body.cantidad });
     }
 
     if (req.method === 'DELETE') {
-      if (parts[4] === 'productos' && parts[5]) {
-        if (mockCart[user]) {
-          mockCart[user] = mockCart[user].filter((p) => String(p.productoId) !== String(parts[5]));
-        }
-      } else {
-        mockCart[user] = [];
-      }
-      res.writeHead(204);
-      res.end();
-      return;
+      if (productoId) cart.delete(productoId);
+      else if (!isItemsRoute) cart.clear();
+      else return send(res, 404, { error: 'Ruta no encontrada' });
+      return send(res, 204);
     }
   }
 
-  res.writeHead(404, { 'Content-Type': 'application/json' });
-  res.end(JSON.stringify({ error: 'Ruta no encontrada' }));
+  send(res, 404, { error: 'Ruta no encontrada' });
 }
 
 function readBody(req) {
@@ -208,7 +238,8 @@ function readBody(req) {
 }
 
 server.listen(PORT, () => {
-  console.log(`\n======================================================`);
+  console.log('\n======================================================');
   console.log(`🚀 ShopHero Frontend listo en: http://localhost:${PORT}`);
-  console.log(`======================================================\n`);
+  console.log(`   Gateway: ${GATEWAY_URL} (si no responde se usa el modo demo)`);
+  console.log('======================================================\n');
 });

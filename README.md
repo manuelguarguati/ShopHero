@@ -173,25 +173,35 @@ curl.exe -H "Authorization: Bearer $token" http://localhost:8080/api/carritos/us
 
 El POST valida el producto `1` en el servicio de productos antes de persistirlo en Redis. La API directa de los servicios no está publicada. Sin JWT, las rutas de negocio responden `401`; un scope insuficiente o un usuario distinto responde `403`.
 
-### 🌐 Interfaz Web del Cliente (Frontend Base)
+### 🌐 Interfaz Web del Cliente
 
-Se incluye una interfaz web moderna de tipo Single Page Application (Tailwind CSS, diseño responsivo, banners de Venta Flash, drawer de carrito y panel de arquitectura):
+SPA sin dependencias en tiempo de ejecución (`frontend/`): HTML + JavaScript puro, Tailwind CSS **precompilado** en `frontend/styles.css` y Font Awesome empaquetado en `frontend/vendor/`. Funciona sin internet (útil para exposiciones).
 
-- **Acceso mediante el API Gateway (con Docker Compose levantado)**:
-  Abre tu navegador en [http://localhost:8080/](http://localhost:8080/)
-  - **Catálogo en vivo**: Consulta productos en tiempo real (`/api/productos`).
-  - **Gestión de Sesión Zero-Trust**: Alterna entre identidades (`usuario_1`, `usuario_2`, `admin`) mediante tokens precargados desde `frontend/dev-tokens.json` para verificar la protección BOLA (OWASP API1).
-  - **Persistencia en Redis**: Agrega, modifica o elimina productos de tu carrito persistente (`/api/carritos/:usuarioId`).
-  - **Monitoreo de Resiliencia**: Detecta si el servicio de productos se cae y notifica visualmente la activación del **Modo Degradado** (`degraded: true` vía Circuit Breaker).
-  - **Simulador DoS**: Dispara ráfagas de peticiones concurrentes para comprobar el Rate Limiting (429) en tiempo real.
-  - **Acceso a Grafana**: Enlace directo al dashboard de observabilidad.
+- **Con Docker Compose levantado**: abre [http://localhost:8080/](http://localhost:8080/) (NGINX sirve la interfaz y el API en el mismo origen).
+- **Vista previa sin Docker**: `node .\scripts\serve-frontend.js` y abre [http://localhost:5000/](http://localhost:5000/). Si el Gateway responde, se le reenvían `/health` y `/api/*`; si no, la interfaz entra en **modo demo** (datos en memoria, scopes y dueño del carrito simulados; no verifica firma ni expiración) y lo indica en pantalla.
 
-- **Previsualización Standalone (sin requerir Docker iniciado)**:
-  Para presentar o inspeccionar la interfaz rápidamente en cualquier entorno:
-  ```powershell
-  node .\scripts\serve-frontend.js
-  ```
-  Abre [http://localhost:5000/](http://localhost:5000/) en tu navegador.
+Funcionalidades:
+
+- **Catálogo** (`GET /api/productos`) con búsqueda, orden por precio/nombre y estados de carga y error.
+- **Carrito persistente en Redis**: agregar, aumentar, disminuir, eliminar y vaciar. Como el API solo suma cantidades (`POST`, 1..1000) o elimina (`DELETE`), para disminuir la interfaz elimina el artículo y lo vuelve a agregar con la nueva cantidad.
+- **Sesiones Zero-Trust**: selector `usuario_1` / `usuario_2` / `admin` con tokens de `frontend/dev-tokens.json`. El panel de la llave muestra los claims (scopes, roles, expiración) y permite pegar un token propio para probar BOLA (OWASP API1). Los errores 401/403/429/503 se muestran tal cual: la interfaz nunca simula un éxito.
+- **Nuevo producto** (`POST /api/productos`) habilitado solo si el token tiene `products:write`.
+- **Checkout simulado**: resumen del pedido y confirmación que vacía el carrito (el servicio de Checkout de ADR-005 aún no existe).
+- **Panel de arquitectura**: estado del Gateway/Redis, circuit breaker (alerta de modo degradado cuando el carrito responde `degraded: true`), prueba de ráfaga para ver los 429 de NGINX y enlace a Grafana.
+
+**Tokens de desarrollo.** Los JWT duran 24 h y se firman con el secreto local de `.dev-secrets/`. Si la interfaz avisa que el token venció o falta, regenera los tokens y recarga:
+
+```powershell
+node .\scripts\generate-frontend-tokens.js
+```
+
+**Estilos.** Solo hace falta recompilar `styles.css` si agregas clases de Tailwind nuevas:
+
+```powershell
+cd frontend
+npm install
+npm run build:css
+```
 
 ### 🎮 Prototipo Interactivo en Consola
 

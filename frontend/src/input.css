@@ -1,0 +1,116 @@
+/*
+ * Fuente de estilos de ShopHero.
+ * El archivo compilado frontend/styles.css se versiona para que la interfaz funcione
+ * sin paso de build ni internet. Para regenerarlo tras cambiar clases:
+ *   cd frontend && npm install && npm run build:css
+ */
+@import "tailwindcss";
+
+@source "../index.html";
+@source "../app.js";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, "JetBrains Mono", "Cascadia Code", SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+@layer base {
+  html { scroll-behavior: smooth; color-scheme: dark; }
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-track { background: rgb(15 23 42 / 0.6); }
+  ::-webkit-scrollbar-thumb { background: rgb(168 85 247 / 0.35); border-radius: 9999px; }
+  ::-webkit-scrollbar-thumb:hover { background: rgb(168 85 247 / 0.6); }
+  input[type="number"]::-webkit-inner-spin-button { opacity: 0.4; }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }
+  }
+}
+
+@layer components {
+  .glass { background: rgb(2 6 23 / 0.82); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); }
+
+  .chip { @apply inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-slate-900/80 border border-slate-800 text-slate-300; }
+  .code { @apply font-mono text-[0.92em] text-purple-200 bg-slate-950 px-1.5 py-0.5 rounded border border-slate-800; }
+
+  /* Indicador de estado del backend */
+  .status-pill { @apply items-center gap-2 px-3 h-10 rounded-xl border text-xs font-bold select-none; }
+  .status-dot { @apply w-2 h-2 rounded-full bg-current; }
+  .status-pill--checking { @apply bg-slate-800/60 border-slate-700 text-slate-300; }
+  .status-pill--online { @apply bg-emerald-500/10 border-emerald-500/30 text-emerald-300; }
+  .status-pill--online .status-dot { @apply animate-pulse; }
+  .status-pill--demo { @apply bg-sky-500/10 border-sky-500/30 text-sky-300; }
+  .status-pill--offline { @apply bg-rose-500/10 border-rose-500/30 text-rose-300; }
+
+  .countdown-cell { @apply flex flex-col items-center min-w-14 px-1; }
+  .countdown-cell > span { @apply text-3xl md:text-4xl font-black text-purple-300 tabular-nums leading-none; }
+  .countdown-cell > small { @apply text-[10px] text-slate-500 font-bold uppercase tracking-wider mt-1.5; }
+
+  /* Botones */
+  .btn-primary { @apply w-full h-11 px-4 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 active:scale-[0.98] text-white text-sm font-bold flex items-center justify-center gap-2 shadow-lg shadow-purple-600/25 transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100; }
+  .btn-secondary { @apply h-11 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-sm font-semibold border border-slate-700 flex items-center justify-center gap-2 transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed; }
+  .btn-danger { @apply h-11 px-4 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-sm font-bold flex items-center justify-center gap-2 transition cursor-pointer; }
+  .icon-btn { @apply w-9 h-9 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 flex items-center justify-center transition cursor-pointer; }
+  .qty-btn { @apply w-8 h-8 rounded-lg bg-slate-800 hover:bg-slate-700 active:scale-90 text-slate-200 text-xs flex items-center justify-center transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed disabled:active:scale-100; }
+
+  /* Formularios */
+  .field-label { @apply block text-slate-300 mb-1.5 text-xs font-semibold; }
+  .field { @apply w-full bg-slate-950 text-slate-100 px-3 py-2.5 rounded-xl border border-slate-800 focus:outline-none focus:ring-2 focus:ring-purple-500 text-sm placeholder:text-slate-600; }
+  .field[aria-invalid="true"] { @apply border-rose-500/70 focus:ring-rose-500; }
+
+  /* Overlays: drawer y modales. JS alterna [hidden] y [data-open]. */
+  .overlay { @apply fixed inset-0 z-50; }
+  .overlay--center { @apply flex items-end sm:items-center justify-center p-3 sm:p-4; }
+  .overlay-backdrop { @apply absolute inset-0 bg-slate-950/80 backdrop-blur-sm opacity-0 transition-opacity duration-200 cursor-pointer; }
+  .overlay[data-open] .overlay-backdrop { @apply opacity-100; }
+
+  .drawer-panel { @apply absolute inset-y-0 right-0 w-full max-w-md bg-slate-900 border-l border-slate-800 shadow-2xl flex flex-col translate-x-full transition-transform duration-300 ease-out; }
+  .overlay[data-open] .drawer-panel { @apply translate-x-0; }
+
+  .modal-panel { @apply relative w-full max-h-[calc(100dvh-1.5rem)] overflow-y-auto bg-slate-900 border border-slate-800 rounded-3xl shadow-2xl p-5 sm:p-6 space-y-4 opacity-0 translate-y-4 sm:scale-95 transition duration-200; }
+  .overlay[data-open] .modal-panel { @apply opacity-100 translate-y-0 sm:scale-100; }
+  .modal-header { @apply flex items-center justify-between border-b border-slate-800 pb-3; }
+  .modal-title { @apply font-bold text-white text-base flex items-center gap-2.5; }
+
+  .monitor-card { @apply bg-slate-950 p-4 rounded-2xl border border-slate-800 space-y-1.5; }
+  .monitor-status { @apply flex items-center gap-2 font-bold text-slate-400; }
+
+  /* Tarjetas de producto */
+  .product-card { @apply relative bg-slate-900/70 border border-slate-800 rounded-3xl p-5 flex flex-col hover:border-purple-500/50 transition duration-300 hover:shadow-2xl hover:shadow-purple-500/10 lg:hover:-translate-y-1; }
+
+  /* Filtro de categorías */
+  .cat-chip { @apply shrink-0 h-9 px-3.5 rounded-xl border border-slate-800 bg-slate-900 text-slate-300 text-xs font-semibold flex items-center gap-2 transition cursor-pointer hover:border-purple-500/50 hover:text-white; }
+  .cat-chip[aria-pressed="true"] { @apply bg-purple-600 border-purple-500 text-white shadow-md shadow-purple-600/25; }
+  .cat-chip > small { @apply text-[10px] font-bold px-1.5 rounded-md bg-black/25 tabular-nums; }
+
+  /* Beneficios */
+  .benefit { @apply flex items-start gap-3 p-4 rounded-2xl border border-slate-800 bg-slate-900/50; }
+  .benefit-icon { @apply w-10 h-10 shrink-0 rounded-xl flex items-center justify-center; }
+  .benefit-title { @apply text-sm font-bold text-white; }
+  .benefit-text { @apply text-xs text-slate-400 mt-0.5 leading-relaxed; }
+
+  .kbd { @apply items-center justify-center min-w-5 h-5 px-1 rounded-md border border-slate-700 bg-slate-800 text-[10px] font-mono font-bold text-slate-400; }
+
+  .hero-grid {
+    background-image: linear-gradient(rgb(255 255 255 / 0.035) 1px, transparent 1px), linear-gradient(90deg, rgb(255 255 255 / 0.035) 1px, transparent 1px);
+    background-size: 40px 40px;
+    mask-image: radial-gradient(ellipse at 70% 40%, black 10%, transparent 70%);
+    -webkit-mask-image: radial-gradient(ellipse at 70% 40%, black 10%, transparent 70%);
+  }
+
+  .no-scrollbar { scrollbar-width: none; }
+  .no-scrollbar::-webkit-scrollbar { display: none; }
+  .product-visual { @apply relative w-full h-40 rounded-2xl flex items-center justify-center mb-4 border border-white/5 overflow-hidden; }
+
+  .skeleton { @apply bg-slate-800/70 rounded-lg animate-pulse; }
+
+  .notice { @apply flex items-start gap-3 p-4 rounded-2xl border text-sm; }
+  .notice--warning { @apply bg-amber-500/10 border-amber-500/30 text-amber-100; }
+  .notice--info { @apply bg-sky-500/10 border-sky-500/30 text-sky-100; }
+  .notice--error { @apply bg-rose-500/10 border-rose-500/30 text-rose-100; }
+
+  .toast { @apply pointer-events-auto max-w-sm w-full sm:w-auto flex items-start gap-2.5 px-4 py-3 rounded-xl border bg-slate-900 shadow-xl text-xs font-semibold transition duration-300 translate-y-2 opacity-0; }
+  .toast[data-show] { @apply translate-y-0 opacity-100; }
+
+  @keyframes bump { 0% { transform: scale(1); } 40% { transform: scale(1.35); } 100% { transform: scale(1); } }
+  .bump { animation: bump 0.35s ease-out; }
+}
