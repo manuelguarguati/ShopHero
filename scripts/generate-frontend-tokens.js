@@ -29,9 +29,9 @@ async function main() {
   }
 
   const tokens = {
-    usuario_1: await createToken('usuario_1', ['products:read', 'cart:read', 'cart:write']),
-    usuario_2: await createToken('usuario_2', ['cart:read', 'cart:write']),
-    admin: await createToken('admin', ['products:read', 'products:write', 'cart:read', 'cart:write'], ['admin']),
+    usuario_1: await createToken('usuario_1', ['products:read', 'cart:read', 'cart:write', 'orders:read', 'orders:write']),
+    usuario_2: await createToken('usuario_2', ['cart:read', 'cart:write', 'orders:read', 'orders:write']),
+    admin: await createToken('admin', ['products:read', 'products:write', 'cart:read', 'cart:write', 'orders:read', 'orders:write'], ['admin']),
     generatedAt: new Date().toISOString(),
   };
 

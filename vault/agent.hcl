@@ -28,3 +28,9 @@ template {
   destination = "/vault/secrets/redis-password"
   perms       = "0644"
 }
+
+template {
+  source      = "/vault/config/postgres-password.ctmpl"
+  destination = "/vault/secrets/postgres-password"
+  perms       = "0644"
+}

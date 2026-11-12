@@ -2,13 +2,18 @@
  * ShopHero — cliente web (SPA sin dependencias).
  *
  * Consume el API Gateway NGINX:
- *   GET    /health
+ *   GET    /health                                (y /health/productos, /health/carrito, /health/pedidos)
  *   GET    /api/productos                         (scope products:read)
  *   POST   /api/productos                         (scope products:write)
+ *   PATCH  /api/productos/:id                     (scope products:write)
+ *   DELETE /api/productos/:id                     (scope products:write)
  *   GET    /api/carritos/:usuarioId               (scope cart:read + dueño del carrito)
  *   POST   /api/carritos/:usuarioId/productos     (scope cart:write; suma cantidad 1..1000)
  *   DELETE /api/carritos/:usuarioId/productos/:id (scope cart:write)
  *   DELETE /api/carritos/:usuarioId               (scope cart:write)
+ *   GET    /api/pedidos/:usuarioId                (scope orders:read + dueño)
+ *   POST   /api/pedidos/:usuarioId                (scope orders:write + dueño; transacción ACID PostgreSQL)
+ *   GET    /api/outbox                            (rol admin; eventos Transactional Outbox ADR-005)
  *
  * Principio: la interfaz nunca finge un éxito. Si el backend responde 401/403/429/503,
  * se muestra el motivo real para que los controles Zero-Trust sean visibles.
@@ -154,6 +159,7 @@
         ? `Acceso denegado: ${serverMsg}.`
         : `Acceso denegado: tu token no tiene permiso${context ? ` para ${context}` : ''}.`;
       case 404: return serverMsg || 'Recurso no encontrado.';
+      case 409: return serverMsg || 'Conflicto de stock disponible al procesar el pedido.';
       case 429: return 'Demasiadas solicitudes: el API Gateway aplicó rate limiting (HTTP 429).';
       case 503: return serverMsg || 'Servicio no disponible temporalmente.';
       default: return serverMsg || `Error inesperado (HTTP ${res.status}).`;
@@ -258,16 +264,22 @@
 
     const gw = $('gwStatus');
     const redis = $('redisStatus');
-    const set = (el, color, text) => { el.innerHTML = `<span class="w-2 h-2 rounded-full ${color}"></span><span>${text}</span>`; };
+    const pgProd = $('pgProdStatus');
+    const ordersSvc = $('ordersSvcStatus');
+    const set = (el, color, text) => { if (el) el.innerHTML = `<span class="w-2 h-2 rounded-full ${color}"></span><span>${text}</span>`; };
     if (state.backend === 'online') {
       set(gw, 'bg-emerald-500', 'Conectado');
       set(redis, 'bg-emerald-500', 'Operativo (/health OK)');
     } else if (state.backend === 'demo') {
       set(gw, 'bg-sky-400', 'Simulado (preview)');
       set(redis, 'bg-sky-400', 'Simulado en memoria');
+      set(pgProd, 'bg-sky-400', 'Simulado en memoria');
+      set(ordersSvc, 'bg-sky-400', 'Simulado en memoria');
     } else if (state.backend === 'offline') {
       set(gw, 'bg-rose-500', 'Sin conexión');
       set(redis, 'bg-rose-500', 'Desconocido');
+      set(pgProd, 'bg-rose-500', 'Desconocido');
+      set(ordersSvc, 'bg-rose-500', 'Desconocido');
     }
     renderCircuitBreaker();
   }
@@ -280,12 +292,26 @@
   }
 
   async function checkBackend() {
-    const res = await apiFetch('/health', { token: null, timeout: 2500 });
-    if (res.status === 0) setBackend('offline');
-    else setBackend(res.mock ? 'demo' : 'online');
-    if (res.status === 503) {
-      $('redisStatus').innerHTML = '<span class="w-2 h-2 rounded-full bg-rose-500"></span><span class="text-rose-300">Redis no disponible (503)</span>';
-    }
+    const [gwRes, prodRes, cartRes, ordRes] = await Promise.all([
+      apiFetch('/health', { token: null, timeout: 2500 }),
+      apiFetch('/health/productos', { token: null, timeout: 2500 }),
+      apiFetch('/health/carrito', { token: null, timeout: 2500 }),
+      apiFetch('/health/pedidos', { token: null, timeout: 2500 }),
+    ]);
+
+    if (gwRes.status === 0) setBackend('offline');
+    else setBackend(gwRes.mock ? 'demo' : 'online');
+
+    const setHealthEl = (el, r, okLabel, failLabel) => {
+      if (!el || gwRes.mock) return;
+      if (r.ok) el.innerHTML = `<span class="w-2 h-2 rounded-full bg-emerald-500"></span><span class="text-emerald-300">${okLabel}</span>`;
+      else if (r.status === 0) el.innerHTML = '<span class="w-2 h-2 rounded-full bg-rose-500"></span><span class="text-rose-300">Sin conexión</span>';
+      else el.innerHTML = `<span class="w-2 h-2 rounded-full bg-rose-500"></span><span class="text-rose-300">${failLabel} (${r.status})</span>`;
+    };
+
+    setHealthEl($('pgProdStatus'), prodRes, 'PostgreSQL OK', 'DB no disponible');
+    setHealthEl($('redisStatus'), cartRes, 'Redis AOF OK', 'Redis no disponible');
+    setHealthEl($('ordersSvcStatus'), ordRes, 'PostgreSQL + Outbox OK', 'Servicio no disponible');
   }
 
   function renderNotices() {
@@ -356,7 +382,11 @@
     const name = normalize(prod.nombre);
     const kind = PRODUCT_KINDS.find((k) => k.match.some((m) => name.includes(m)));
     const base = kind || { icon: 'fa-box', tone: 'from-slate-500/25 text-slate-300', category: 'Accesorios', desc: 'Garantía oficial de 1 año.' };
-    return { ...base, desc: prod.descripcion || prod.desc || base.desc };
+    return {
+      ...base,
+      category: prod.categoria || base.category,
+      desc: prod.descripcion || prod.desc || base.desc,
+    };
   }
 
   function findProduct(id) {
@@ -512,11 +542,29 @@
     }
 
     const canAdd = can('cart:write');
+    const isAdmin = can('products:write');
     grid.innerHTML = list.map((prod) => {
       const id = String(prod.id);
       const meta = productMeta(prod);
-      const qty = state.quantities[id] || 1;
-      const busy = state.pending.has(`add-${id}`);
+      const hasStockField = Number.isInteger(prod.stock);
+      const stock = hasStockField ? prod.stock : null;
+      const outOfStock = hasStockField && stock <= 0;
+      const maxQty = hasStockField && stock > 0 ? Math.min(99, stock) : 99;
+      const qty = Math.min(maxQty, state.quantities[id] || 1);
+      const busy = state.pending.has(`add-${id}`) || state.pending.has(`admin-${id}`);
+      const stockBadge = !hasStockField
+        ? ''
+        : outOfStock
+          ? '<span class="text-[11px] font-bold text-rose-400"><i class="fa-solid fa-circle-xmark mr-1" aria-hidden="true"></i>Agotado</span>'
+          : stock <= 5
+            ? `<span class="text-[11px] font-bold text-amber-300"><i class="fa-solid fa-fire mr-1" aria-hidden="true"></i>¡Últimas ${stock} uds.!</span>`
+            : `<span class="text-[11px] font-semibold text-emerald-400"><i class="fa-solid fa-cubes mr-1" aria-hidden="true"></i>${stock} disponibles</span>`;
+      const adminRow = isAdmin
+        ? `<div class="flex items-center justify-between gap-2 pt-2 border-t border-slate-800/60 text-[11px]">
+             <button type="button" data-action="restock-product" data-product-id="${escapeHtml(id)}" ${busy ? 'disabled' : ''} class="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-emerald-300 font-semibold transition cursor-pointer disabled:opacity-50"><i class="fa-solid fa-boxes-stacked mr-1" aria-hidden="true"></i>+10 stock</button>
+             <button type="button" data-action="delete-product" data-product-id="${escapeHtml(id)}" ${busy ? 'disabled' : ''} class="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-rose-950/60 text-rose-300 font-semibold transition cursor-pointer disabled:opacity-50"><i class="fa-solid fa-trash-can mr-1" aria-hidden="true"></i>Eliminar</button>
+           </div>`
+        : '';
       return `
         <article class="product-card group" aria-labelledby="prod-name-${escapeHtml(id)}">
           <div class="product-visual bg-gradient-to-br ${meta.tone.split(' ')[0]} to-slate-950">
@@ -524,8 +572,11 @@
             <span class="absolute top-3 left-3 px-2 py-0.5 rounded-full text-[10px] font-black bg-pink-500 text-white shadow">−${Math.round(FLASH_DISCOUNT * 100)}%</span>
             <span class="absolute top-3 right-3 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-slate-950/70 text-slate-300 border border-white/10">${escapeHtml(meta.category)}</span>
           </div>
-          <h3 id="prod-name-${escapeHtml(id)}" class="font-extrabold text-base text-white group-hover:text-purple-200 transition-colors">${escapeHtml(prod.nombre)}</h3>
+          <div class="flex items-start justify-between gap-2">
+            <h3 id="prod-name-${escapeHtml(id)}" class="font-extrabold text-base text-white group-hover:text-purple-200 transition-colors">${escapeHtml(prod.nombre)}</h3>
+          </div>
           <p class="text-xs text-slate-400 mt-1 leading-relaxed flex-1">${escapeHtml(meta.desc)}</p>
+          ${stockBadge ? `<div class="mt-2">${stockBadge}</div>` : ''}
 
           <div class="mt-4 pt-4 border-t border-slate-800/80 space-y-3">
             <div class="flex items-end justify-between gap-3">
@@ -537,17 +588,19 @@
                 <div class="text-xl font-black text-white tabular-nums">${formatMoney(prod.precio)}</div>
               </div>
               <div class="flex items-center gap-1 bg-slate-950 border border-slate-800 rounded-xl p-1" role="group" aria-label="Cantidad de ${escapeHtml(prod.nombre)}">
-                <button type="button" class="qty-btn" data-action="qty-decrease" data-product-id="${escapeHtml(id)}" aria-label="Disminuir cantidad" ${qty <= 1 ? 'disabled' : ''}><i class="fa-solid fa-minus" aria-hidden="true"></i></button>
+                <button type="button" class="qty-btn" data-action="qty-decrease" data-product-id="${escapeHtml(id)}" aria-label="Disminuir cantidad" ${qty <= 1 || outOfStock ? 'disabled' : ''}><i class="fa-solid fa-minus" aria-hidden="true"></i></button>
                 <span id="qty-${escapeHtml(id)}" class="w-8 text-center text-sm font-mono font-black text-white tabular-nums" aria-live="polite">${qty}</span>
-                <button type="button" class="qty-btn" data-action="qty-increase" data-product-id="${escapeHtml(id)}" aria-label="Aumentar cantidad" ${qty >= 99 ? 'disabled' : ''}><i class="fa-solid fa-plus" aria-hidden="true"></i></button>
+                <button type="button" class="qty-btn" data-action="qty-increase" data-product-id="${escapeHtml(id)}" aria-label="Aumentar cantidad" ${qty >= maxQty || outOfStock ? 'disabled' : ''}><i class="fa-solid fa-plus" aria-hidden="true"></i></button>
               </div>
             </div>
-            <button type="button" class="btn-primary" data-action="add-to-cart" data-product-id="${escapeHtml(id)}" ${busy || !canAdd ? 'disabled' : ''}
+            <button type="button" class="btn-primary" data-action="add-to-cart" data-product-id="${escapeHtml(id)}" ${busy || !canAdd || outOfStock ? 'disabled' : ''}
               ${!canAdd ? 'title="Tu token no tiene el scope cart:write"' : ''}>
-              ${busy ? '<i class="fa-solid fa-spinner animate-spin" aria-hidden="true"></i> Agregando…'
-                : canAdd ? '<i class="fa-solid fa-cart-plus" aria-hidden="true"></i> Agregar al carrito'
-                  : '<i class="fa-solid fa-lock" aria-hidden="true"></i> Sin permiso para comprar'}
+              ${busy ? '<i class="fa-solid fa-spinner animate-spin" aria-hidden="true"></i> Procesando…'
+                : outOfStock ? '<i class="fa-solid fa-ban" aria-hidden="true"></i> Sin stock'
+                  : canAdd ? '<i class="fa-solid fa-cart-plus" aria-hidden="true"></i> Agregar al carrito'
+                    : '<i class="fa-solid fa-lock" aria-hidden="true"></i> Sin permiso para comprar'}
             </button>
+            ${adminRow}
           </div>
         </article>`;
     }).join('');
@@ -555,7 +608,9 @@
 
   function changeQuantity(productId, delta) {
     const id = String(productId);
-    state.quantities[id] = Math.max(1, Math.min(99, (state.quantities[id] || 1) + delta));
+    const prod = findProduct(id);
+    const maxQty = prod && Number.isInteger(prod.stock) && prod.stock > 0 ? Math.min(99, prod.stock) : 99;
+    state.quantities[id] = Math.max(1, Math.min(maxQty, (state.quantities[id] || 1) + delta));
     renderProducts();
   }
 
@@ -821,8 +876,16 @@
         <span class="text-2xl font-black text-purple-300 tabular-nums">${formatMoney(totals.total)}</span>
       </div>
       <p class="text-[11px] text-emerald-300">Ahorras ${formatMoney(totals.savings)} con la venta flash.</p>
-      <div class="notice notice--info !p-3 !text-xs"><i class="fa-solid fa-circle-info mt-0.5" aria-hidden="true"></i>
-        <p>Pago simulado: el servicio de Checkout y la pasarela (ADR-005) aún no están implementados. Al confirmar se genera un número de pedido y se vacía tu carrito en Redis.</p></div>
+      <div>
+        <label for="checkoutMethod" class="field-label">Método de pago</label>
+        <select id="checkoutMethod" class="field">
+          <option value="Tarjeta">Tarjeta crédito / débito (•••• 4242)</option>
+          <option value="PSE">Transferencia PSE</option>
+          <option value="Nequi">Nequi</option>
+        </select>
+      </div>
+      <div class="notice notice--info !p-3 !text-xs"><i class="fa-solid fa-database mt-0.5" aria-hidden="true"></i>
+        <p>Transacción ACID real en PostgreSQL (<code class="code">POST /api/pedidos/${escapeHtml(state.currentUser)}</code>): bloquea filas, descuenta stock, registra evento Outbox (ADR-005) y limpia el carrito en Redis.</p></div>
       <div class="flex justify-end gap-2.5">
         <button type="button" data-action="close-overlay" class="btn-secondary">Seguir comprando</button>
         <button type="button" id="btnConfirmOrder" data-action="confirm-order" class="btn-primary !w-auto px-5"><i class="fa-solid fa-lock" aria-hidden="true"></i> Confirmar pedido</button>
@@ -832,25 +895,131 @@
 
   async function confirmOrder() {
     const btn = $('btnConfirmOrder');
+    const metodoPago = $('checkoutMethod') ? $('checkoutMethod').value : 'Tarjeta';
     btn.disabled = true;
     btn.innerHTML = '<i class="fa-solid fa-spinner animate-spin" aria-hidden="true"></i> Procesando…';
     const totals = cartTotals();
-    const res = await apiFetch(cartPath(), { method: 'DELETE' });
+    const res = await apiFetch(`/api/pedidos/${encodeURIComponent(state.currentUser)}`, {
+      method: 'POST',
+      body: { metodoPago },
+    });
     if (!res.ok) {
       btn.disabled = false;
       btn.innerHTML = '<i class="fa-solid fa-lock" aria-hidden="true"></i> Reintentar';
       showToast(describeError(res, 'completar el pedido'), 'error', 6000);
       return;
     }
-    const orderId = `SH-${Date.now().toString(36).toUpperCase().slice(-6)}`;
+    const order = res.data || {};
+    const orderId = order.id || 'SH-OK';
     $('checkoutBody').innerHTML = `
       <div class="text-center py-6 space-y-3">
         <div class="w-16 h-16 mx-auto rounded-full bg-emerald-500/15 border border-emerald-500/40 flex items-center justify-center"><i class="fa-solid fa-check text-3xl text-emerald-400" aria-hidden="true"></i></div>
-        <p class="text-lg font-black text-white">¡Pedido confirmado!</p>
-        <p class="text-sm text-slate-400">Número de pedido <span class="font-mono font-bold text-purple-300">${orderId}</span> · ${formatMoney(totals.total)}</p>
-        <button type="button" data-action="close-all" class="btn-primary !w-auto px-6 mx-auto">Volver a la tienda</button>
+        <p class="text-lg font-black text-white">¡Pedido guardado en PostgreSQL!</p>
+        <p class="text-sm text-slate-400">Pedido <span class="font-mono font-bold text-purple-300">${escapeHtml(orderId)}</span> · ${escapeHtml(order.metodoPago || metodoPago)} · ${formatMoney(order.total ?? totals.total)}</p>
+        <p class="text-xs text-emerald-300">Stock descontado en PostgreSQL · Evento <code class="code">PedidoConfirmado</code> en Outbox</p>
+        <div class="flex justify-center gap-2.5 pt-2">
+          <button type="button" data-action="open-orders" class="btn-secondary !h-10"><i class="fa-solid fa-receipt" aria-hidden="true"></i> Ver mis pedidos</button>
+          <button type="button" data-action="close-all" class="btn-primary !w-auto !h-10 px-5">Volver a la tienda</button>
+        </div>
       </div>`;
-    await loadCart();
+    await Promise.all([loadCatalog({ silent: true }), loadCart()]);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Historial de pedidos y Transactional Outbox (PostgreSQL)
+  // ---------------------------------------------------------------------------
+  async function loadOrders() {
+    const body = $('ordersBody');
+    body.innerHTML = '<div class="py-8 text-center text-slate-400 text-sm"><i class="fa-solid fa-spinner animate-spin mr-2" aria-hidden="true"></i>Consultando PostgreSQL…</div>';
+    const isAdmin = can('products:write');
+    const ordersPath = isAdmin ? '/api/pedidos' : `/api/pedidos/${encodeURIComponent(state.currentUser)}`;
+    const [ordersRes, outboxRes] = await Promise.all([
+      apiFetch(ordersPath),
+      isAdmin ? apiFetch('/api/outbox') : Promise.resolve(null),
+    ]);
+
+    if (!ordersRes.ok) {
+      body.innerHTML = `<div class="notice notice--error"><i class="fa-solid fa-triangle-exclamation mt-0.5" aria-hidden="true"></i><div><p class="font-bold">No se pudieron cargar los pedidos</p><p class="text-xs">${escapeHtml(describeError(ordersRes, 'consultar pedidos'))}</p></div></div>`;
+      return;
+    }
+
+    const orders = Array.isArray(ordersRes.data) ? ordersRes.data : [];
+    const ordersHtml = orders.length === 0
+      ? '<div class="rounded-2xl border border-dashed border-slate-800 p-8 text-center text-sm text-slate-400"><i class="fa-solid fa-receipt text-2xl text-slate-600 mb-2 block" aria-hidden="true"></i>Aún no hay pedidos confirmados en PostgreSQL.</div>'
+      : orders.map((o) => `
+        <div class="rounded-2xl border border-slate-800 bg-slate-950/70 p-4 space-y-2.5">
+          <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800/80 pb-2">
+            <div class="flex items-center gap-2">
+              <span class="font-mono font-bold text-purple-300 text-sm">${escapeHtml(o.id)}</span>
+              <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">${escapeHtml(o.estado)}</span>
+              <span class="text-xs text-slate-400">${escapeHtml(o.usuarioId)} · ${escapeHtml(o.metodoPago || 'Tarjeta')}</span>
+            </div>
+            <span class="font-mono font-black text-white text-sm tabular-nums">${formatMoney(o.total)}</span>
+          </div>
+          <ul class="text-xs text-slate-300 space-y-1">
+            ${(o.items || []).map((i) => `<li class="flex justify-between gap-2"><span>${i.cantidad} × ${escapeHtml(i.nombreProducto)}</span><span class="font-mono text-slate-400 tabular-nums">${formatMoney(i.precioUnitario * i.cantidad)}</span></li>`).join('')}
+          </ul>
+          <p class="text-[11px] text-slate-500">${o.creadoEn ? new Date(o.creadoEn).toLocaleString('es-CO') : ''}</p>
+        </div>`).join('');
+
+    let outboxHtml = '';
+    if (outboxRes && outboxRes.ok && Array.isArray(outboxRes.data)) {
+      const events = outboxRes.data.slice(0, 6);
+      outboxHtml = `
+        <div class="pt-2 border-t border-slate-800 space-y-2">
+          <h4 class="text-xs font-bold uppercase tracking-wider text-slate-400"><i class="fa-solid fa-paper-plane text-purple-400 mr-1.5" aria-hidden="true"></i>Transactional Outbox (ADR-005 · solo admin)</h4>
+          ${events.length === 0
+            ? '<p class="text-xs text-slate-500">Sin eventos publicados todavía.</p>'
+            : `<div class="space-y-1.5">${events.map((ev) => `
+                <div class="flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-slate-950 border border-slate-800/80 text-xs">
+                  <span class="font-mono text-slate-300">#${ev.id} · <b class="text-purple-300">${escapeHtml(ev.tipoEvento)}</b> (${escapeHtml(ev.agregadoId)})</span>
+                  <span class="text-[11px] text-slate-500">${ev.creadoEn ? new Date(ev.creadoEn).toLocaleTimeString('es-CO') : ''}</span>
+                </div>`).join('')}</div>`}
+        </div>`;
+    }
+
+    body.innerHTML = `<div class="space-y-3 max-h-[60dvh] overflow-y-auto pr-1">${ordersHtml}${outboxHtml}</div>`;
+  }
+
+  async function restockProduct(productId) {
+    const id = String(productId);
+    const prod = findProduct(id);
+    if (!prod || state.pending.has(`admin-${id}`)) return;
+    const nextStock = (Number.isInteger(prod.stock) ? prod.stock : 0) + 10;
+    state.pending.add(`admin-${id}`);
+    renderProducts();
+    const res = await apiFetch(`/api/productos/${encodeURIComponent(id)}`, { method: 'PATCH', body: { stock: nextStock } });
+    state.pending.delete(`admin-${id}`);
+    if (res.ok) {
+      showToast(`Stock de “${prod.nombre}” actualizado a ${nextStock} uds.`, 'success');
+      await loadCatalog({ silent: true });
+    } else {
+      showToast(describeError(res, 'actualizar stock'), 'error', 5000);
+      renderProducts();
+    }
+  }
+
+  async function deleteProduct(productId) {
+    const id = String(productId);
+    const prod = findProduct(id);
+    if (!prod || state.pending.has(`admin-${id}`)) return;
+    const ok = await confirmDialog({
+      title: '¿Eliminar producto?',
+      text: `Se eliminará “${prod.nombre}” de PostgreSQL.`,
+      okLabel: 'Sí, eliminar',
+    });
+    if (!ok) return;
+    state.pending.add(`admin-${id}`);
+    renderProducts();
+    const res = await apiFetch(`/api/productos/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    state.pending.delete(`admin-${id}`);
+    if (res.ok) {
+      showToast(`Producto “${prod.nombre}” eliminado.`, 'success');
+      await loadCatalog({ silent: true });
+    } else {
+      showToast(describeError(res, 'eliminar producto'), 'error', 5000);
+      renderProducts();
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -877,9 +1046,15 @@
     event.preventDefault();
     const nameEl = $('newProdName');
     const priceEl = $('newProdPrice');
+    const stockEl = $('newProdStock');
+    const categoryEl = $('newProdCategory');
+    const descEl = $('newProdDesc');
     const errorEl = $('newProductError');
     const nombre = nameEl.value.trim();
     const precio = Number(priceEl.value);
+    const stock = stockEl ? Number(stockEl.value) : 25;
+    const categoria = categoryEl ? categoryEl.value : 'Accesorios';
+    const descripcion = descEl ? descEl.value.trim() : '';
 
     const problems = [];
     nameEl.toggleAttribute('aria-invalid', !nombre);
@@ -887,6 +1062,7 @@
     const badPrice = !Number.isFinite(precio) || precio < 1000;
     priceEl.toggleAttribute('aria-invalid', badPrice);
     if (badPrice) problems.push('El precio debe ser de al menos $1.000.');
+    if (!Number.isInteger(stock) || stock < 0) problems.push('El stock debe ser un entero mayor o igual a 0.');
     if (problems.length) {
       errorEl.textContent = problems.join(' ');
       errorEl.classList.remove('hidden');
@@ -898,7 +1074,10 @@
     submitBtn.disabled = true;
     const original = submitBtn.innerHTML;
     submitBtn.innerHTML = '<i class="fa-solid fa-spinner animate-spin" aria-hidden="true"></i> Creando…';
-    const res = await apiFetch('/api/productos', { method: 'POST', body: { nombre, precio: Math.round(precio) } });
+    const res = await apiFetch('/api/productos', {
+      method: 'POST',
+      body: { nombre, precio: Math.round(precio), stock, categoria, descripcion },
+    });
     submitBtn.disabled = false;
     submitBtn.innerHTML = original;
 
@@ -1030,6 +1209,10 @@
       'clear-cart': () => clearCart(),
       'open-checkout': () => openCheckout(),
       'confirm-order': () => confirmOrder(),
+      'open-orders': () => { closeOverlay('checkoutModal'); closeOverlay('cartDrawer'); openOverlay('ordersModal'); loadOrders(); },
+      'reload-orders': () => loadOrders(),
+      'restock-product': () => restockProduct(productId),
+      'delete-product': () => deleteProduct(productId),
       'open-new-product': () => openNewProduct(),
       'open-monitor': () => { openOverlay('monitorModal'); checkBackend(); },
       'test-rate-limit': () => runRateLimitTest(),

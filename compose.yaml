@@ -1,22 +1,53 @@
 services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: shophero
+      POSTGRES_DB: shophero
+      POSTGRES_PASSWORD_FILE: /vault/secrets/postgres-password
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["while [ ! -s /vault/secrets/postgres-password ]; do sleep 1; done; exec docker-entrypoint.sh postgres"]
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+      - vault-secrets:/vault/secrets:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U shophero -d shophero"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+    networks:
+      - shophero-internal
+    depends_on:
+      vault-agent:
+        condition: service_started
+    restart: unless-stopped
+
   productos:
     build:
       context: ./microservicio-productos
       dockerfile: Dockerfile
     environment:
       PORT: 3000
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: shophero
+      POSTGRES_DB: shophero
+      POSTGRES_PASSWORD_PATH: /vault/secrets/postgres-password
       OTEL_SERVICE_NAME: productos
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
       JWT_ISSUER: ${JWT_ISSUER:-shophero-local}
       JWT_AUDIENCE: ${JWT_AUDIENCE:-shophero-api}
       JWT_SECRET_PATH: /vault/secrets/jwt-secret
     entrypoint: ["/bin/sh", "-c"]
-    command: ["while [ ! -s /vault/secrets/jwt-secret ]; do sleep 1; done; exec node src/server.js"]
+    command: ["while [ ! -s /vault/secrets/jwt-secret ] || [ ! -s /vault/secrets/postgres-password ]; do sleep 1; done; exec node src/server.js"]
     volumes:
       - vault-secrets:/vault/secrets:ro
     networks:
       - shophero-internal
     depends_on:
+      postgres:
+        condition: service_healthy
       otel-collector:
         condition: service_started
       vault-agent:
@@ -77,8 +108,46 @@ services:
       retries: 5
     restart: unless-stopped
 
+  pedidos:
+    build:
+      context: ./microservicio-pedidos
+      dockerfile: Dockerfile
+    environment:
+      PORT: 3002
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: shophero
+      POSTGRES_DB: shophero
+      POSTGRES_PASSWORD_PATH: /vault/secrets/postgres-password
+      CARRITO_URL: http://carrito:3001
+      OTEL_SERVICE_NAME: pedidos
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+      JWT_ISSUER: ${JWT_ISSUER:-shophero-local}
+      JWT_AUDIENCE: ${JWT_AUDIENCE:-shophero-api}
+      JWT_SECRET_PATH: /vault/secrets/jwt-secret
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["while [ ! -s /vault/secrets/jwt-secret ] || [ ! -s /vault/secrets/postgres-password ]; do sleep 1; done; exec node src/server.js"]
+    volumes:
+      - vault-secrets:/vault/secrets:ro
+    networks:
+      - shophero-internal
+    depends_on:
+      postgres:
+        condition: service_healthy
+      carrito:
+        condition: service_healthy
+      otel-collector:
+        condition: service_started
+      vault-agent:
+        condition: service_started
+    restart: unless-stopped
+
   prometheus:
     image: prom/prometheus:v3.2.1
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --web.external-url=http://localhost:8080/prometheus/
+      - --web.route-prefix=/prometheus/
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
     networks:
@@ -86,6 +155,7 @@ services:
     depends_on:
       - productos
       - carrito
+      - pedidos
     restart: unless-stopped
 
   grafana:
@@ -129,6 +199,8 @@ services:
         condition: service_healthy
       carrito:
         condition: service_healthy
+      pedidos:
+        condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/health"]
       interval: 10s
@@ -167,6 +239,7 @@ services:
       - ./vault/agent.hcl:/vault/config/agent.hcl:ro
       - ./vault/jwt-secret.ctmpl:/vault/config/jwt-secret.ctmpl:ro
       - ./vault/redis-password.ctmpl:/vault/config/redis-password.ctmpl:ro
+      - ./vault/postgres-password.ctmpl:/vault/config/postgres-password.ctmpl:ro
       - ./.dev-secrets/vault-agent-token:/vault/credentials/agent-token:ro
       - vault-secrets:/vault/secrets
     networks:
@@ -177,6 +250,7 @@ services:
     restart: unless-stopped
 
 volumes:
+  postgres-data:
   redis-data:
   vault-secrets:
 

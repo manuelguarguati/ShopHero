@@ -98,4 +98,33 @@ describe('API de productos', () => {
     expect(issuerResponse.statusCode).toBe(401);
     expect(audienceResponse.statusCode).toBe(401);
   });
+
+  it('actualiza y elimina un producto con products:write', async () => {
+    const token = await issueToken(['products:write', 'products:read']);
+    const patchRes = await request(app).patch('/api/productos/1')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ stock: 12, precio: 115000 });
+    expect(patchRes.statusCode).toBe(200);
+    expect(patchRes.body).toMatchObject({ id: 1, stock: 12, precio: 115000 });
+
+    const delRes = await request(app).delete('/api/productos/1')
+      .set('Authorization', `Bearer ${token}`);
+    expect(delRes.statusCode).toBe(204);
+
+    const getRes = await request(app).get('/api/productos/1')
+      .set('Authorization', `Bearer ${token}`);
+    expect(getRes.statusCode).toBe(404);
+  });
+
+  it('responde 503 en /health si la base de datos falla', async () => {
+    const failingApp = createApp({
+      jwtSecret: TEST_SECRET,
+      store: {
+        ping: async () => { throw new Error('db down'); },
+        list: async () => { throw new Error('db down'); },
+      },
+    });
+    const healthRes = await request(failingApp).get('/health');
+    expect(healthRes.statusCode).toBe(503);
+  });
 });

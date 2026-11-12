@@ -1,4 +1,4 @@
-$ErrorActionPreference = 'Stop'
+﻿$ErrorActionPreference = 'Stop'
 
 $secretDirectory = Join-Path $PSScriptRoot '..\.dev-secrets'
 New-Item -ItemType Directory -Force -Path $secretDirectory | Out-Null
@@ -46,6 +46,8 @@ Invoke-Vault -Arguments @('policy', 'write', 'shophero-agent', '/vault/config/ag
 
 $jwtSecretPath = Join-Path $secretDirectory 'jwt-secret'
 $redisPasswordPath = Join-Path $secretDirectory 'redis-password'
+$postgresPasswordPath = Join-Path $secretDirectory 'postgres-password'
+
 if (-not (Test-Path $jwtSecretPath)) {
   $bytes = New-Object byte[] 32
   [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
@@ -57,11 +59,20 @@ if (-not (Test-Path $redisPasswordPath)) {
   $redisPassword = ($bytes | ForEach-Object { $_.ToString('x2') }) -join ''
   [System.IO.File]::WriteAllText($redisPasswordPath, $redisPassword)
 }
+if (-not (Test-Path $postgresPasswordPath)) {
+  $bytes = New-Object byte[] 32
+  [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
+  $postgresPassword = ($bytes | ForEach-Object { $_.ToString('x2') }) -join ''
+  [System.IO.File]::WriteAllText($postgresPasswordPath, $postgresPassword)
+}
 
 $jwtSecret = [System.IO.File]::ReadAllText($jwtSecretPath).Trim()
 $redisPassword = [System.IO.File]::ReadAllText($redisPasswordPath).Trim()
+$postgresPassword = [System.IO.File]::ReadAllText($postgresPasswordPath).Trim()
+
 Invoke-Vault -Arguments @('kv', 'put', 'secret/shophero/jwt', "secret=$jwtSecret") | Out-Null
 Invoke-Vault -Arguments @('kv', 'put', 'secret/shophero/redis', "password=$redisPassword") | Out-Null
+Invoke-Vault -Arguments @('kv', 'put', 'secret/shophero/postgres', "password=$postgresPassword") | Out-Null
 
 $agentTokenJson = Invoke-Vault -Arguments @('token', 'create', '-orphan', '-policy=shophero-agent', '-ttl=24h', '-format=json')
 $agentToken = ($agentTokenJson | ConvertFrom-Json).auth.client_token
@@ -70,9 +81,23 @@ if (-not $agentToken) {
 }
 [System.IO.File]::WriteAllText($agentTokenPath, $agentToken, [System.Text.UTF8Encoding]::new($false))
 
+node (Join-Path $PSScriptRoot 'generate-frontend-tokens.js')
+
+node (Join-Path $PSScriptRoot 'generate-frontend-tokens.js')
+
+docker compose up -d --force-recreate vault-agent
+if ($LASTEXITCODE -ne 0) {
+  throw 'No se pudo iniciar vault-agent.'
+}
+
 docker compose up --build -d
 if ($LASTEXITCODE -ne 0) {
   throw 'No se pudo iniciar el stack ShopHero.'
 }
 
-Write-Output 'Vault inicializado; secretos montados dinámicamente en los servicios.'
+docker compose restart gateway
+if ($LASTEXITCODE -ne 0) {
+  throw 'No se pudo recargar el API Gateway NGINX.'
+}
+
+Write-Output 'Vault inicializado; 11 contenedores ShopHero (PostgreSQL, Redis, Vault, microservicios, NGINX y observabilidad) activos.'

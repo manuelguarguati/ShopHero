@@ -59,7 +59,7 @@ const ID_PATTERN = /^[a-zA-Z0-9_-]{1,100}$/;
 const server = http.createServer(async (req, res) => {
   const pathname = req.url.split('?')[0];
 
-  if (pathname === '/health' || pathname.startsWith('/api/')) {
+  if (pathname === '/health' || pathname.startsWith('/health/') || pathname.startsWith('/api/')) {
     const body = ['POST', 'PUT', 'PATCH'].includes(req.method) ? await readBody(req).catch(() => Buffer.alloc(0)) : undefined;
 
     try {
