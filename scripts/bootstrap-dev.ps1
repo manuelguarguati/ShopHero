@@ -7,7 +7,7 @@ if (-not (Test-Path $agentTokenPath)) {
   New-Item -ItemType File -Path $agentTokenPath | Out-Null
 }
 
-docker compose up -d vault
+docker compose up -d --force-recreate vault
 if ($LASTEXITCODE -ne 0) {
   throw 'No se pudo iniciar Vault en modo de desarrollo.'
 }
@@ -20,10 +20,13 @@ for ($attempt = 0; $attempt -lt 30 -and -not $rootToken; $attempt++) {
   }
   $tokenMatch = [regex]::Matches(($vaultLogs -join "`n"), 'Root Token:\s*(\S+)') | Select-Object -Last 1
   if ($tokenMatch) {
-    $rootToken = $tokenMatch.Groups[1].Value
-  } else {
-    Start-Sleep -Seconds 2
+    docker compose exec -T vault vault status | Out-Null
+    if ($LASTEXITCODE -eq 0) {
+      $rootToken = $tokenMatch.Groups[1].Value
+      break
+    }
   }
+  Start-Sleep -Seconds 2
 }
 if (-not $rootToken) {
   throw 'Vault no publicó su token efímero de desarrollo.'
