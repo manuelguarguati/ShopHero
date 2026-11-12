@@ -375,7 +375,11 @@
     { match: ['mouse', 'raton'], icon: 'fa-computer-mouse', tone: 'from-sky-500/25 text-sky-300', category: 'Mouse', desc: 'Sensor óptico de alta precisión y respuesta de 1 ms.' },
     { match: ['monitor', 'pantalla'], icon: 'fa-desktop', tone: 'from-emerald-500/25 text-emerald-300', category: 'Monitores', desc: 'Alta tasa de refresco para partidas sin desenfoque.' },
     { match: ['control', 'gamepad', 'joystick'], icon: 'fa-gamepad', tone: 'from-amber-500/25 text-amber-300', category: 'Controles', desc: 'Agarre ergonómico y vibración háptica.' },
+    { match: ['ram ', 'ddr'], icon: 'fa-memory', tone: 'from-violet-500/25 text-violet-300', category: 'Componentes', desc: 'Más rendimiento para juegos y multitarea.' },
     { match: ['ssd', 'disco', 'memoria'], icon: 'fa-hard-drive', tone: 'from-indigo-500/25 text-indigo-300', category: 'Almacenamiento', desc: 'Cargas más rápidas para tus juegos.' },
+    { match: ['silla', 'chair'], icon: 'fa-chair', tone: 'from-orange-500/25 text-orange-300', category: 'Sillas', desc: 'Soporte lumbar y reclinación para largas sesiones.' },
+    { match: ['microfono', 'microphone'], icon: 'fa-microphone', tone: 'from-teal-500/25 text-teal-300', category: 'Streaming', desc: 'Voz clara para tus partidas y transmisiones.' },
+    { match: ['camara', 'webcam', 'stream'], icon: 'fa-video', tone: 'from-teal-500/25 text-teal-300', category: 'Streaming', desc: 'Imagen y sonido nítidos para tus transmisiones.' },
   ];
 
   function productMeta(prod) {
