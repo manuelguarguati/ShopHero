@@ -25,8 +25,15 @@ agrodata/
 ├── docs/                                 # Arquitectura Cloud-Native, OWASP y Trade-Offs
 │   ├── punto 4 Trade-off.docx            # Documento Word de Trade-offs (Punto 4)
 │   └── trade-offs.md                     # Análisis de Trade-Offs (Markdown)
-├── microservicio-productos/              # Microservicio existente de productos
-├── microservicio-carrito/                # Microservicio de carrito (Fase 1)
+├── microservicio-productos/              # Microservicio de catálogo e inventario (PostgreSQL)
+├── microservicio-carrito/                # Microservicio de carrito persistente (Redis + Circuit Breaker)
+├── microservicio-pedidos/                # Microservicio de checkout y Transactional Outbox (PostgreSQL)
+├── postgres/                             # Esquema SQL e inicialización de PostgreSQL 16
+├── nginx/                                # API Gateway NGINX (rate limiting + DNS dinámico)
+├── vault/                                # Políticas y plantillas Vault Agent
+├── prometheus/ & grafana/ & otel-collector/ # Stack de observabilidad (métricas + trazas)
+├── frontend/                             # SPA web conectada al API Gateway
+├── compose.yaml                          # Orquestación de los 11 contenedores Docker
 └── README.md                             # Documento Principal
 ```
 
@@ -135,22 +142,38 @@ curl http://localhost:3000/api/productos
 
 Consulta el [README del microservicio](microservicio-productos/README.md) para ejecutarlo sin Docker.
 
-## Etapa Cloud-Native: observabilidad, Zero Trust y resiliencia
+## Etapa Cloud-Native: 11 Contenedores, PostgreSQL, Vault, Zero Trust y Resiliencia
 
-Esta etapa publica únicamente el API Gateway en `http://localhost:8080`. Los servicios, Redis, Prometheus, Grafana, OpenTelemetry Collector y Vault quedan en redes internas. Redis permanece como instancia standalone con AOF y los carritos conservan su TTL de 30 días.
+La arquitectura actual en [`compose.yaml`](compose.yaml) levanta **11 contenedores Docker independientes**, aislados en dos redes (`gateway-edge` pública en `:8080` y `shophero-internal` marcada `internal: true` sin exposición directa al host) y **3 volúmenes** (`postgres-data`, `redis-data`, `vault-secrets`):
 
-### Levantar el entorno y generar un JWT local
+| Contenedor | Imagen / Build | Función principal |
+| :--- | :--- | :--- |
+| `gateway` | `nginxinc/nginx-unprivileged:1.27-alpine` | API Gateway en `:8080`, SPA estática, rate limiting `100 r/s`, cabeceras de seguridad y DNS dinámico (`127.0.0.11`) |
+| `productos` | `./microservicio-productos` | Catálogo, stock y CRUD conectado a PostgreSQL 16 (`GET/POST/PATCH/DELETE /api/productos`) |
+| `carrito` | `./microservicio-carrito` | Carritos persistentes en Redis 7 con Circuit Breaker (`opossum`) hacia `productos` |
+| `pedidos` | `./microservicio-pedidos` | Checkout ACID en PostgreSQL (`FOR UPDATE`, descuento de stock, tabla `outbox_eventos` ADR-005 y limpieza en Redis) |
+| `postgres` | `postgres:16-alpine` | Base de datos relacional (`productos`, `pedidos`, `pedido_items`, `outbox_eventos`) con clave vía Vault |
+| `redis` | `redis:7-alpine` | Almacén AOF para carritos (`TTL` 30 días) con clave vía Vault |
+| `vault` | `hashicorp/vault:1.18.3` | Gestor central de secretos (`secret/shophero/jwt`, `redis`, `postgres`) |
+| `vault-agent` | `hashicorp/vault:1.18.3` | Renderiza secretos en el volumen `/vault/secrets/` |
+| `otel-collector` | `otel/opentelemetry-collector-contrib:0.120.0` | Recolector de trazas OpenTelemetry (OTLP/HTTP) |
+| `prometheus` | `prom/prometheus:v3.2.1` | Scrapeo de `/metrics` de `productos`, `carrito` y `pedidos` (`/prometheus/`) |
+| `grafana` | `grafana/grafana:11.5.2` | Dashboards de observabilidad (`/grafana/`) |
 
-En PowerShell, desde la raíz del repositorio:
+### Levantar los 11 contenedores y generar tokens JWT locales
+
+En PowerShell, desde la raíz del repositorio (con **Docker Desktop** en ejecución):
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\bootstrap-dev.ps1
 ```
 
-El script inicia Vault dev, genera secretos aleatorios dentro de `.dev-secrets/` (ignorado por Git), crea el token de lectura de Vault Agent y ejecuta `docker compose up --build -d`. Después, se puede levantar/reconstruir el stack con:
+El script inicia Vault dev, genera secretos aleatorios dentro de `.dev-secrets/` (ignorado por Git) para JWT, Redis y PostgreSQL, crea el token de Vault Agent, regenera `frontend/dev-tokens.json` y ejecuta `docker compose up --build -d` recargando el API Gateway. Para verificar los 11 contenedores, redes y volúmenes:
 
 ```powershell
-docker compose up --build -d
+docker compose ps
+docker network ls
+docker volume ls
 ```
 
 Genera un JWT de 15 minutos para lectura y escritura del carrito:
@@ -182,12 +205,12 @@ SPA sin dependencias en tiempo de ejecución (`frontend/`): HTML + JavaScript pu
 
 Funcionalidades:
 
-- **Catálogo** (`GET /api/productos`) con búsqueda, orden por precio/nombre y estados de carga y error.
+- **Catálogo en PostgreSQL** (`GET /api/productos`) con stock real en base de datos, categorías, búsqueda, orden por precio/nombre y estados de carga/error.
 - **Carrito persistente en Redis**: agregar, aumentar, disminuir, eliminar y vaciar. Como el API solo suma cantidades (`POST`, 1..1000) o elimina (`DELETE`), para disminuir la interfaz elimina el artículo y lo vuelve a agregar con la nueva cantidad.
-- **Sesiones Zero-Trust**: selector `usuario_1` / `usuario_2` / `admin` con tokens de `frontend/dev-tokens.json`. El panel de la llave muestra los claims (scopes, roles, expiración) y permite pegar un token propio para probar BOLA (OWASP API1). Los errores 401/403/429/503 se muestran tal cual: la interfaz nunca simula un éxito.
-- **Nuevo producto** (`POST /api/productos`) habilitado solo si el token tiene `products:write`.
-- **Checkout simulado**: resumen del pedido y confirmación que vacía el carrito (el servicio de Checkout de ADR-005 aún no existe).
-- **Panel de arquitectura**: estado del Gateway/Redis, circuit breaker (alerta de modo degradado cuando el carrito responde `degraded: true`), prueba de ráfaga para ver los 429 de NGINX y enlace a Grafana.
+- **Sesiones Zero-Trust**: selector `usuario_1` / `usuario_2` / `admin` con tokens de `frontend/dev-tokens.json`. El panel de la llave muestra los claims (scopes, roles, expiración) y permite pegar un token propio para probar BOLA (OWASP API1). Los errores 401/403/409/429/503 se muestran tal cual: la interfaz nunca simula un éxito.
+- **Administración de catálogo** (`POST /api/productos`, `PATCH /api/productos/:id`, `DELETE /api/productos/:id`): habilitado solo para `admin` (`products:write`) para crear productos con stock/categoría, reponer stock (`+10`) o eliminar.
+- **Checkout real y Transactional Outbox (ADR-005)**: `POST /api/pedidos/:usuarioId` ejecuta la transacción ACID en PostgreSQL (bloquea filas, valida y descuenta stock, guarda el pedido y registra `PedidoConfirmado` en `outbox_eventos`) y limpia el carrito en Redis. Incluye modal **Pedidos** (`GET /api/pedidos/:usuarioId`, y `/api/outbox` para `admin`).
+- **Panel de arquitectura**: estado en vivo de Gateway, `productos` + PostgreSQL, `carrito` + Redis, `pedidos` + Outbox, circuit breaker, prueba de ráfaga HTTP 429 y enlaces directos a **Grafana** (`/grafana/`) y **Prometheus** (`/prometheus/`).
 
 **Tokens de desarrollo.** Los JWT duran 24 h y se firman con el secreto local de `.dev-secrets/`. Si la interfaz avisa que el token venció o falta, regenera los tokens y recarga:
 
@@ -217,25 +240,20 @@ node .\scripts\demo-interactivo.js --auto
 
 ### Métricas, dashboard y pruebas
 
-- Dashboard: [http://localhost:8080/grafana/](http://localhost:8080/grafana/). Grafana tiene rol Viewer anónimo en el entorno local.
-- Prometheus y `/metrics` son internos; para inspeccionar el estado del scraping:
+- Dashboards y métricas en vivo vía NGINX: [http://localhost:8080/grafana/](http://localhost:8080/grafana/) y [http://localhost:8080/prometheus/](http://localhost:8080/prometheus/). Grafana tiene rol Viewer anónimo en el entorno local.
+- Para inspeccionar targets y trazas por consola:
 
 ```powershell
-docker compose exec prometheus wget -qO- http://localhost:9090/api/v1/targets
+docker compose exec prometheus wget -qO- http://localhost:9090/prometheus/api/v1/targets
 docker compose logs --tail 50 otel-collector
 ```
 
-- Ejecuta las pruebas:
+- Ejecuta las pruebas de los 3 microservicios:
 
 ```powershell
-Push-Location .\microservicio-productos
-npm.cmd ci
-npm.cmd test
-Pop-Location
-Push-Location .\microservicio-carrito
-npm.cmd ci
-npm.cmd test
-Pop-Location
+Push-Location .\microservicio-productos; npm.cmd ci; npm.cmd test; Pop-Location
+Push-Location .\microservicio-carrito; npm.cmd ci; npm.cmd test; Pop-Location
+Push-Location .\microservicio-pedidos; npm.cmd ci; npm.cmd test; Pop-Location
 ```
 
 - Ejecuta el escenario de rate limit. Requiere k6:
