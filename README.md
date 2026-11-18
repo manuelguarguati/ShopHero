@@ -273,6 +273,19 @@ Start-Sleep -Seconds 6
 k6 run -e MODE=recovery -e TOKEN=$token .\tests\load\triad.js
 ```
 
+### Respaldos y restauración
+
+ShopHero cuenta con scripts de administración automatizada de respaldos locales y rotación de copias:
+
+- **Generar respaldo de PostgreSQL y Redis** (guarda en `backups/` con estampado `AAAAMMDD-HHMMSS` y retiene los últimos 7):
+  ```powershell
+  powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\backup.ps1
+  ```
+- **Restaurar la base de datos PostgreSQL** (aplica el último respaldo `.sql` generado):
+  ```powershell
+  powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\restore.ps1
+  ```
+
 Terraform se valida sin aprovisionar recursos:
 
 ```powershell
